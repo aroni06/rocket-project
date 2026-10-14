@@ -1,0 +1,18 @@
+; SYNTHETIC thrust curve for examples and tests only. This is NOT a real motor.
+; It is shaped like a typical 38 mm H-class reload so the example runs out of the box.
+; For real analysis, download the .eng file for your motor from https://www.thrustcurve.org
+; and point your config at it.
+;
+; name  dia(mm) len(mm) delays prop(kg) total(kg) manufacturer
+Synthetic_H250 38 152 6-10-14 0.135 0.260 Example
+0.000 0.0
+0.030 260.0
+0.080 240.0
+0.300 225.0
+0.600 215.0
+0.900 200.0
+1.100 185.0
+1.200 160.0
+1.270 60.0
+1.320 0.0
+;
