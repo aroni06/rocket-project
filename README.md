@@ -16,8 +16,8 @@ lands in milestone 3.*
 ## Quickstart
 
 ```bash
-git clone https://github.com/<your-username>/apogee.git
-cd apogee
+git clone https://github.com/aroni06/rocket-project.git
+cd rocket-project
 pip install -e ".[dev]"
 
 apogee simulate configs/example_l1.toml --plot flight.png --csv flight.csv
