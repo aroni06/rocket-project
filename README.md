@@ -1,5 +1,9 @@
 # apogee
 
+[![CI](https://github.com/aroni06/rocket-project/actions/workflows/ci.yml/badge.svg)](https://github.com/aroni06/rocket-project/actions/workflows/ci.yml)
+![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
+![License: MIT](https://img.shields.io/badge/license-MIT-green)
+
 **A 2D rocket flight simulator for model and high-power rockets, written in Python.** It
 predicts apogee, max velocity, max acceleration, max dynamic pressure, rail exit speed and
 landing conditions from a rocket definition and a real motor thrust curve.
