@@ -1,0 +1,21 @@
+# Example single-stage high-power rocket on a 38 mm H motor.
+# The motor curve is synthetic (see the .eng file header); swap in a real one
+# from thrustcurve.org for real predictions.
+
+[rocket]
+name = "Example L1 rocket"
+dry_mass_kg = 1.10      # airframe, fins, recovery, avionics (no motor)
+diameter_m = 0.066      # 2.6 in body tube
+cd = 0.45               # constant drag coefficient for now
+
+[motor]
+file = "../data/motors/Synthetic_H250.eng"
+
+[environment]
+site_elevation_m = 0.0
+wind_speed_mps = 0.0
+temperature_offset_K = 0.0
+
+[rail]
+length_m = 1.83         # 6 ft rail
+angle_deg = 90.0
