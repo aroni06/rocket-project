@@ -1,0 +1,42 @@
+; Estes B4, as flown by OpenRocket 23.09 in simple_model_rocket.ork.
+; Thrust is the thrust column of the stored simulation, thinned to the points
+; that reproduce it within 0.02 N. Masses are fitted to its motor-mass
+; column. Written by make_motors.py; see that file for the method.
+B4 18 70 4 0.00604 0.01892 Estes
+0.015 0.314
+0.025 0.732
+0.035 1.359
+0.045 2.154
+0.055 3.115
+0.065 4.119
+0.075 5.383
+0.095 7.997
+0.105 9.336
+0.115 10.866
+0.125 11.939
+0.135 12.578
+0.145 12.315
+0.154 11.851
+0.169 10.920
+0.175 10.418
+0.182 9.817
+0.188 9.149
+0.195 7.833
+0.204 6.225
+0.213 5.376
+0.223 4.971
+0.231 4.699
+0.251 4.321
+0.261 4.165
+0.312 3.847
+0.335 3.745
+0.424 3.550
+0.534 3.370
+0.562 3.345
+0.843 3.345
+0.933 3.439
+0.977 3.449
+0.994 3.099
+1.006 1.813
+1.018 0.759
+1.030 0.000

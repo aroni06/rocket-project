@@ -1,0 +1,97 @@
+# "A simple model rocket", the example design that ships with OpenRocket, written by hand
+# from the .ork file. Every dimension is the design's. OpenRocket computes each part's mass
+# from its dimensions and material density, and the masses here are computed the same way
+# (the README shows the arithmetic). Nothing is tuned to match OpenRocket's results.
+#
+# This is the file's default motor configuration, a C6-5, which is its "Simulation 4".
+# compare.py flies the other four configurations by swapping the motor and the delay.
+
+[rocket]
+name = "Simple model rocket"
+
+[motor]
+file = "Estes_C6.eng"
+position_m = 0.338                 # the motor sticks 8 mm out of the back of the tube
+
+[environment]
+site_elevation_m = 0
+wind_speed_mps = 2.0
+
+[rail]
+length_m = 1.0
+angle_deg = 90
+
+[nose]
+shape = "ogive"
+length_m = 0.10
+mass_kg = 0.013156                 # 2 mm polystyrene shell, plus its shoulder and cap
+cg_m = 0.0760
+
+[body]
+length_m = 0.30
+diameter_m = 0.025
+mass_kg = 0.015381                 # 1 mm cardboard wall, 680 kg/m^3
+
+[fins]
+count = 3
+root_chord_m = 0.0508
+tip_chord_m = 0.0508
+span_m = 0.03
+sweep_m = 0.0254
+thickness_m = 0.002
+density_kgm3 = 680.0               # cardboard
+profile = "rounded"
+
+[drag]
+model = "geometry"                 # every part has OpenRocket's "normal" finish, 60 micrometres
+
+[lug]
+outer_diameter_m = 0.007
+inner_diameter_m = 0.005
+
+[[mass]]
+name = "shock cord"
+mass_kg = 0.00072
+position_m = 0.146
+
+[[mass]]
+name = "parachute"
+mass_kg = 0.007976
+position_m = 0.153
+
+[[mass]]
+name = "wadding"
+mass_kg = 0.002
+position_m = 0.195
+
+[[mass]]
+name = "launch lug"
+mass_kg = 0.000449
+position_m = 0.25
+
+[[mass]]
+name = "engine block"
+mass_kg = 0.000481
+position_m = 0.3345
+
+[[mass]]
+name = "forward centering ring"
+mass_kg = 0.000179
+position_m = 0.354
+
+[[mass]]
+name = "motor mount tube"
+mass_kg = 0.001482
+position_m = 0.3675
+
+[[mass]]
+name = "aft centering ring"
+mass_kg = 0.000179
+position_m = 0.399
+
+[[parachute]]
+name = "parachute"
+diameter_m = 0.30
+cd = 0.8
+deploy = "burnout"                 # the motor's ejection charge
+delay_s = 5.0

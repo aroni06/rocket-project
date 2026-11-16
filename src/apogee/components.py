@@ -1,8 +1,12 @@
 """Airframe geometry and mass properties.
 
 An :class:`Airframe` is a nose cone, one constant-diameter body tube, one set of
-trapezoidal fins and any number of point masses (recovery gear, avionics, ballast).
+trapezoidal fins and any number of point masses (recovery gear, avionics, ballast). A
+nose cone wider or narrower than the body tube is joined to it by a :class:`Transition`.
 All positions are distances aft of the nose tip, in metres.
+
+Each part can carry its own surface ``roughness`` [m] for the drag estimate, for a rocket
+whose parts are finished differently; left as ``None`` the part takes the estimate's.
 
 The airframe answers two questions the flight model can't: where the dry center of
 gravity is, and (through :mod:`apogee.aero`) where the center of pressure is.
@@ -26,16 +30,23 @@ class NoseCone:
     If ``cg`` is not given it defaults to 2/3 of the length, which is exact for a thin
     conical shell and a reasonable guess for the other shapes. Weigh and balance the real
     part when it matters.
+
+    ``diameter`` is the diameter of the base. Leave it out when the nose is the same
+    diameter as the body tube; give it, with a :class:`Transition`, when it is not.
     """
 
     length: float
     shape: str = "ogive"
     mass: float = 0.0
     cg: float | None = None
+    diameter: float | None = None
+    roughness: float | None = None
 
     def __post_init__(self) -> None:
         if self.length <= 0:
             raise ValueError("nose length must be positive")
+        if self.diameter is not None and self.diameter <= 0:
+            raise ValueError("nose diameter must be positive")
         if self.shape not in NOSE_SHAPES:
             raise ValueError(f"nose shape must be one of {NOSE_SHAPES}")
         if self.mass < 0:
@@ -74,12 +85,44 @@ class NoseCone:
 
 
 @dataclass
+class Transition:
+    """Conical section between the nose cone and a body tube of a different diameter.
+
+    Its front is the diameter of the nose cone's base and its back is the diameter of
+    the body tube, so it only needs a length. It narrows when the nose is wider than the
+    body (a boattail) and widens when the nose is narrower (a shoulder). ``cg`` is
+    measured from its front end and defaults to the centroid of a thin conical shell.
+    """
+
+    length: float
+    mass: float = 0.0
+    cg: float | None = None
+    roughness: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.length <= 0:
+            raise ValueError("transition length must be positive")
+        if self.mass < 0:
+            raise ValueError("transition mass must be non-negative")
+
+    def wetted_area(self, fore_radius: float, aft_radius: float) -> float:
+        """Outside surface area [m^2]."""
+        slant = math.hypot(self.length, aft_radius - fore_radius)
+        return math.pi * (fore_radius + aft_radius) * slant
+
+    def shell_centroid(self, fore_radius: float, aft_radius: float) -> float:
+        """Centroid of the surface, aft of the front end [m]."""
+        return self.length * (fore_radius + 2.0 * aft_radius) / (3.0 * (fore_radius + aft_radius))
+
+
+@dataclass
 class BodyTube:
-    """Constant-diameter body tube, starting at the base of the nose cone."""
+    """Constant-diameter body tube, starting at the base of the nose cone or transition."""
 
     length: float
     diameter: float
     mass: float = 0.0
+    roughness: float | None = None
 
     def __post_init__(self) -> None:
         if self.length <= 0 or self.diameter <= 0:
@@ -113,6 +156,7 @@ class FinSet:
     thickness: float | None = None
     density: float | None = None
     profile: str = "rounded"
+    roughness: float | None = None
 
     def __post_init__(self) -> None:
         if self.count < 3:
@@ -157,6 +201,30 @@ class FinSet:
 
 
 @dataclass
+class LaunchLug:
+    """Launch lugs or rail buttons, for their drag. Their mass goes in as a point mass.
+
+    A lug is a short tube on the side of the body that slides over the launch rod. Leave
+    ``inner_diameter`` at zero for a rail button or anything else solid.
+    """
+
+    outer_diameter: float
+    inner_diameter: float = 0.0
+    count: int = 1
+
+    def __post_init__(self) -> None:
+        if not 0 <= self.inner_diameter < self.outer_diameter:
+            raise ValueError("launch lug needs 0 <= inner diameter < outer diameter")
+        if self.count < 1:
+            raise ValueError("launch lug count must be at least 1")
+
+    @property
+    def frontal_area(self) -> float:
+        """Area facing the airflow: the tube walls, or the whole face if solid [m^2]."""
+        return self.count * math.pi / 4.0 * (self.outer_diameter**2 - self.inner_diameter**2)
+
+
+@dataclass
 class PointMass:
     """Anything with mass and no aerodynamic effect: recovery gear, avionics, ballast."""
 
@@ -183,9 +251,16 @@ class Airframe:
     masses: list[PointMass] = field(default_factory=list)
     mass_override: float | None = None
     cg_override: float | None = None
+    transition: Transition | None = None
+    lug: LaunchLug | None = None
 
     def __post_init__(self) -> None:
-        if self.fin_position < self.nose.length:
+        stepped = not math.isclose(self.nose_diameter, self.body.diameter, rel_tol=1e-9)
+        if stepped and self.transition is None:
+            raise ValueError("the nose and body diameters differ: add a transition between them")
+        if self.transition is not None and not stepped:
+            raise ValueError("a transition needs a nose diameter different from the body diameter")
+        if self.fin_position < self.body_start:
             raise ValueError("fins must sit on the body tube, aft of the nose cone")
         if self.fin_position + self.fins.root_chord > self.length + 1e-9:
             raise ValueError("fin root extends past the aft end of the body")
@@ -193,12 +268,23 @@ class Airframe:
             raise ValueError("airframe has no mass: give component masses or a dry mass")
 
     @property
+    def nose_diameter(self) -> float:
+        """Diameter of the nose cone's base [m]."""
+        return self.nose.diameter if self.nose.diameter is not None else self.body.diameter
+
+    @property
     def diameter(self) -> float:
-        return self.body.diameter
+        """Largest diameter [m], the reference for drag, stability and calibers."""
+        return max(self.nose_diameter, self.body.diameter)
+
+    @property
+    def body_start(self) -> float:
+        """Front of the body tube, aft of the nose tip [m]."""
+        return self.nose.length + (self.transition.length if self.transition else 0.0)
 
     @property
     def length(self) -> float:
-        return self.nose.length + self.body.length
+        return self.body_start + self.body.length
 
     @property
     def fin_position(self) -> float:
@@ -211,9 +297,16 @@ class Airframe:
         """(mass, cg position) for every component."""
         items = [
             (self.nose.mass, self.nose.cg),
-            (self.body.mass, self.nose.length + self.body.length / 2.0),
+            (self.body.mass, self.body_start + self.body.length / 2.0),
             (self.fins.mass, self.fin_position + self.fins.centroid),
         ]
+        if self.transition is not None:
+            cg = self.transition.cg
+            if cg is None:
+                cg = self.transition.shell_centroid(
+                    self.nose_diameter / 2.0, self.body.diameter / 2.0
+                )
+            items.append((self.transition.mass, self.nose.length + cg))
         items += [(m.mass, m.position) for m in self.masses]
         return items
 

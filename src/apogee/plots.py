@@ -10,6 +10,7 @@ from matplotlib.figure import Figure
 
 from .atmosphere import G0
 from .flight import FlightResult
+from .openrocket import OpenRocketSimulation
 from .rocket import Rocket
 from .study import DesignPoint, Optimum, SweepResult, Variable
 
@@ -151,15 +152,18 @@ def plot_rocket(rocket: Rocket, path: str | Path | None = None) -> Figure:
     airframe = rocket.airframe
     if airframe is None:
         raise ValueError(f"{rocket.name} has no airframe geometry to draw")
-    r, length = airframe.diameter / 2, airframe.length
+    r, length = airframe.body.diameter / 2, airframe.length
+    r_nose, x_body = airframe.nose_diameter / 2, airframe.body_start
     fins, x_fin = airframe.fins, airframe.fin_position
 
     fig, ax = plt.subplots(figsize=(9, 3.2), layout="constrained")
-    xn, yn = airframe.nose.profile(r)
-    outline_x = np.concatenate([xn, [length, length], xn[::-1]])
-    outline_y = np.concatenate([yn, [r, -r], -yn[::-1]])
+    xn, yn = airframe.nose.profile(r_nose)
+    outline_x = np.concatenate([xn, [x_body, length, length, x_body], xn[::-1]])
+    outline_y = np.concatenate([yn, [r, r, -r, -r], -yn[::-1]])
     ax.fill(outline_x, outline_y, facecolor="none", edgecolor=INK_MUTED, linewidth=1.4)
-    ax.plot([airframe.nose.length] * 2, [-r, r], color=INK_MUTED, linewidth=0.8)
+    ax.plot([airframe.nose.length] * 2, [-r_nose, r_nose], color=INK_MUTED, linewidth=0.8)
+    if airframe.transition is not None:
+        ax.plot([x_body] * 2, [-r, r], color=INK_MUTED, linewidth=0.8)
     fin_x = [
         x_fin,
         x_fin + fins.sweep,
@@ -173,7 +177,7 @@ def plot_rocket(rocket: Rocket, path: str | Path | None = None) -> Figure:
     burn = rocket.motor.burn_time if rocket.motor else 0.0
     cp = rocket.center_of_pressure.position
     cg0, cg1 = rocket.cg_at(0.0), rocket.cg_at(burn)
-    reach = r + fins.span
+    reach = max(r + fins.span, r_nose)
     ax.plot(cg0, 0, "o", color=LINE, markersize=9)
     ax.plot(cp, 0, "o", color=ACCENT, markersize=9)
     ax.annotate(
@@ -227,6 +231,57 @@ def plot_rocket(rocket: Rocket, path: str | Path | None = None) -> Figure:
 
 
 # Design studies
+
+
+def plot_comparison(
+    rocket: Rocket,
+    result: FlightResult,
+    sim: OpenRocketSimulation,
+    path: str | Path | None = None,
+) -> Figure:
+    """A flight and an OpenRocket simulation of the same rocket, plotted together.
+
+    Altitude and speed against time, and the drag coefficient during the climb. The drag
+    coefficients are both taken at the speed and altitude of OpenRocket's flight, so that
+    panel compares the two drag models and not the two trajectories.
+    """
+    climb = sim.time <= sim.events.get("apogee", sim.time[-1])
+    drag = "Drag coefficient" in sim.columns and rocket.airframe is not None
+    fig, axes = plt.subplots(
+        1, 3 if drag else 2, figsize=(12 if drag else 8.5, 3.9), layout="constrained"
+    )
+    panels = [
+        (result.time, result.z, sim.time, sim["Altitude"], "Altitude above pad [m]"),
+        (result.time, result.speed, sim.time, sim["Total velocity"], "Speed [m/s]"),
+    ]
+    if drag:
+        ours = [
+            rocket.drag_coefficient(mach, reynolds / rocket.airframe.length)
+            for mach, reynolds in zip(
+                sim["Mach number"][climb], sim["Reynolds number"][climb], strict=True
+            )
+        ]
+        panels.append(
+            (
+                sim.time[climb],
+                ours,
+                sim.time[climb],
+                sim["Drag coefficient"][climb],
+                "Drag coefficient",
+            )
+        )
+    for ax, (t_ours, ours, t_theirs, theirs, label) in zip(axes, panels, strict=True):
+        ax.plot(t_theirs, theirs, color=SERIES[1], linewidth=3.2, alpha=0.55, label="OpenRocket")
+        ax.plot(t_ours, ours, color=SERIES[0], linewidth=1.6, label="apogee")
+        ax.set_xlabel("Time [s]", color=INK)
+        ax.set_ylabel(label, color=INK)
+        _style(ax)
+    axes[-1].set_ylim(bottom=0)
+    axes[0].legend(frameon=False, labelcolor=INK, loc="upper right")
+    fig.suptitle(f"{result.rocket_name}: this simulator against OpenRocket", color=INK, fontsize=12)
+    if path is not None:
+        fig.savefig(path, dpi=150)
+    return fig
 
 
 def plot_sweep(

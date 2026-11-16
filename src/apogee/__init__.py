@@ -2,7 +2,7 @@
 
 from .aero import CdTable, barrowman
 from .atmosphere import ConstantAtmosphere, StandardAtmosphere
-from .components import Airframe, BodyTube, FinSet, NoseCone, PointMass
+from .components import Airframe, BodyTube, FinSet, LaunchLug, NoseCone, PointMass, Transition
 from .config import load_config
 from .environment import Environment
 from .flight import FlightEvent, FlightResult, LaunchRail, simulate
@@ -21,6 +21,7 @@ __all__ = [
     "FinSet",
     "FlightEvent",
     "FlightResult",
+    "LaunchLug",
     "LaunchRail",
     "Motor",
     "NoseCone",
@@ -30,6 +31,7 @@ __all__ = [
     "Rocket",
     "StandardAtmosphere",
     "Study",
+    "Transition",
     "Variable",
     "barrowman",
     "load_config",

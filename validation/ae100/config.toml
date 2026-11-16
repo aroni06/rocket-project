@@ -1,0 +1,86 @@
+# The "ae 100 rocket" OpenRocket design, converted by hand from the .ork file.
+# Every number is taken from the design; nothing is tuned to match OpenRocket's results.
+# Launch conditions are the ones stored with the OpenRocket simulation: sea level,
+# standard atmosphere, 1 m rod, 2 m/s wind.
+
+[rocket]
+name = "AE 100 rocket"
+
+[motor]
+file = "Estes_D12.eng"
+
+[environment]
+site_elevation_m = 0
+wind_speed_mps = 2.0
+
+[rail]
+length_m = 1.0
+angle_deg = 90
+
+[nose]
+shape = "elliptical"
+length_m = 0.05
+diameter_m = 0.058
+mass_kg = 0.006
+cg_m = 0.028
+
+[transition]                       # the nose is wider than the body tube
+length_m = 0.03
+mass_kg = 0.004
+
+[body]
+length_m = 0.381
+diameter_m = 0.041
+mass_kg = 0.022
+roughness_m = 20e-6                # "smooth" finish in OpenRocket
+
+[fins]                             # OpenRocket freeform fins, which here are a trapezoid
+count = 3
+root_chord_m = 0.1002
+tip_chord_m = 0.085
+span_m = 0.023
+sweep_m = 0.025
+thickness_m = 0.003175
+mass_kg = 0.003
+profile = "square"
+
+[drag]
+model = "geometry"
+roughness_m = 60e-6                # "normal" finish in OpenRocket, on everything but the body
+
+[[mass]]
+name = "nose weight"
+mass_kg = 0.06
+position_m = 0.043
+
+[[mass]]
+name = "payload"
+mass_kg = 0.15
+position_m = 0.1025
+
+[[mass]]
+name = "parachute"
+mass_kg = 0.0051
+position_m = 0.2225
+
+[[mass]]
+name = "motor mount"
+mass_kg = 0.005
+position_m = 0.4229
+
+[[mass]]
+name = "forward centering ring"
+mass_kg = 0.001
+position_m = 0.4024
+
+[[mass]]
+name = "aft centering ring"
+mass_kg = 0.001
+position_m = 0.4545
+
+[[parachute]]
+name = "parachute"
+diameter_m = 0.3048
+cd = 0.8
+deploy = "burnout"                 # the motor's ejection charge, 3 s after burnout
+delay_s = 3.0

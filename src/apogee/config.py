@@ -34,6 +34,18 @@ Example::
     diameter_m = 0.066
     mass_kg = 0.50
 
+    # Only when the nose cone is wider or narrower than the body tube: give the nose its
+    # own diameter_m and add the conical section that joins the two.
+    # [transition]
+    # length_m = 0.03
+    # mass_kg = 0.004
+
+    # Optional: launch lugs or rail buttons, for their drag (their mass is a [[mass]]).
+    # [lug]
+    # outer_diameter_m = 0.007
+    # inner_diameter_m = 0.005     # leave out for a rail button
+    # count = 1
+
     [fins]
     count = 3
     root_chord_m = 0.15
@@ -47,7 +59,9 @@ Example::
     # Needs fins.thickness_m.
     [drag]
     model = "geometry"
-    roughness_m = 60e-6            # surface roughness; 60 micrometres is regular paint
+    roughness_m = 60e-6            # surface roughness; 60 micrometres is regular paint.
+                                   # [nose], [transition], [body] and [fins] can each give
+                                   # their own roughness_m when they are finished differently
 
     [[mass]]                       # recovery gear, avionics, ballast...
     name = "recovery"
@@ -74,7 +88,7 @@ from pathlib import Path
 
 from .aero import CdTable, DragBuildup
 from .atmosphere import StandardAtmosphere
-from .components import Airframe, BodyTube, FinSet, NoseCone, PointMass
+from .components import Airframe, BodyTube, FinSet, LaunchLug, NoseCone, PointMass, Transition
 from .environment import Environment
 from .flight import LaunchRail
 from .motor import Motor
@@ -144,12 +158,12 @@ def _rocket(data: dict, base: Path, motor: Motor, parachutes: list[Parachute]) -
             raise ValueError('[drag] model must be "geometry"')
         if "cd" in cfg or "cd_file" in cfg:
             raise ValueError("give either [drag] or cd / cd_file in [rocket], not both")
-    geometry = [key for key in ("nose", "body", "fins") if key in data]
+    geometry = [key for key in ("nose", "body", "fins", "transition", "lug") if key in data]
     if not geometry:
         if drag is not None:
             raise ValueError("[drag] needs the geometry: [nose], [body] and [fins]")
         return Rocket(name, cfg["dry_mass_kg"], cfg["diameter_m"], motor, cd, parachutes)
-    if len(geometry) < 3:
+    if not {"nose", "body", "fins"} <= set(geometry):
         raise ValueError("stability needs all of [nose], [body] and [fins]")
     airframe = _airframe(data, cfg)
     if drag is not None:
@@ -161,17 +175,22 @@ def _rocket(data: dict, base: Path, motor: Motor, parachutes: list[Parachute]) -
 
 def _airframe(data: dict, rocket: dict) -> Airframe:
     nose, body, fins = data["nose"], data["body"], data["fins"]
+    transition = data.get("transition")
+    lug = data.get("lug")
     return Airframe(
         nose=NoseCone(
             length=nose["length_m"],
             shape=nose.get("shape", "ogive"),
             mass=nose.get("mass_kg", 0.0),
             cg=nose.get("cg_m"),
+            diameter=nose.get("diameter_m"),
+            roughness=nose.get("roughness_m"),
         ),
         body=BodyTube(
             length=body["length_m"],
             diameter=body.get("diameter_m", rocket.get("diameter_m")),
             mass=body.get("mass_kg", 0.0),
+            roughness=body.get("roughness_m"),
         ),
         fins=FinSet(
             count=fins["count"],
@@ -184,10 +203,24 @@ def _airframe(data: dict, rocket: dict) -> Airframe:
             thickness=fins.get("thickness_m"),
             density=fins.get("density_kgm3"),
             profile=fins.get("profile", "rounded"),
+            roughness=fins.get("roughness_m"),
         ),
         masses=[PointMass(m["name"], m["mass_kg"], m["position_m"]) for m in data.get("mass", [])],
         mass_override=rocket.get("dry_mass_kg"),
         cg_override=rocket.get("dry_cg_m"),
+        transition=transition
+        and Transition(
+            length=transition["length_m"],
+            mass=transition.get("mass_kg", 0.0),
+            cg=transition.get("cg_m"),
+            roughness=transition.get("roughness_m"),
+        ),
+        lug=lug
+        and LaunchLug(
+            outer_diameter=lug["outer_diameter_m"],
+            inner_diameter=lug.get("inner_diameter_m", 0.0),
+            count=lug.get("count", 1),
+        ),
     )
 
 
