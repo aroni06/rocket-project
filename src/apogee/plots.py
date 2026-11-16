@@ -97,6 +97,18 @@ def plot_flight(result: FlightResult, path: str | Path | None = None) -> Figure:
     return fig
 
 
+def trajectory_marks(result: FlightResult) -> list[tuple[str, str, bool]]:
+    """Events to label on a flight path: (event key, label, label goes on the right)."""
+    deploys = {k: f"{v} opens" for k, v in _event_labels(result).items() if k.endswith("_deploy")}
+    marks = {"apogee": f"Apogee {result.apogee:.0f} m", **deploys}
+    land = result.events["landing"]
+    marks["landing"] = f"Landing, {land.downrange:.0f} m from pad"
+    # Alternate label sides so neighbouring markers (apogee, drogue) don't overlap.
+    return [
+        (key, label, i % 2 == 0 or key == "landing") for i, (key, label) in enumerate(marks.items())
+    ]
+
+
 def plot_trajectory(result: FlightResult, path: str | Path | None = None) -> Figure:
     """Flight path in the vertical plane (downrange vs altitude), drawn to scale."""
     fig, ax = plt.subplots(figsize=(8, 6), layout="constrained")
@@ -112,15 +124,9 @@ def plot_trajectory(result: FlightResult, path: str | Path | None = None) -> Fig
         ax.spines[side].set_color(INK_MUTED)
     ax.tick_params(colors=INK_MUTED)
 
-    deploys = {k: f"{v} opens" for k, v in _event_labels(result).items() if k.endswith("_deploy")}
-    marks = {"apogee": f"Apogee {result.apogee:.0f} m", **deploys}
-    land = result.events["landing"]
-    marks["landing"] = f"Landing, {land.downrange:.0f} m from pad"
-    for i, (key, label) in enumerate(marks.items()):
+    for key, label, right in trajectory_marks(result):
         ev = result.events[key]
         ax.plot(ev.downrange, ev.altitude, "o", color=INK, markersize=4)
-        # Alternate label sides so neighbouring markers (apogee, drogue) don't overlap.
-        right = i % 2 == 0 or key == "landing"
         ax.annotate(
             label,
             (ev.downrange, ev.altitude),
