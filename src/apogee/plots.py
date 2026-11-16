@@ -5,12 +5,15 @@ from __future__ import annotations
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import numpy as np
 from matplotlib.figure import Figure
 
 from .atmosphere import G0
 from .flight import FlightResult
+from .rocket import Rocket
 
 LINE = "#2a78d6"
+ACCENT = "#eb6834"
 INK = "#0b0b0b"
 INK_MUTED = "#52514e"
 GRID = "#e4e3df"
@@ -121,6 +124,105 @@ def plot_trajectory(result: FlightResult, path: str | Path | None = None) -> Fig
         )
     ax.plot(0, 0, "^", color=INK_MUTED, markersize=6)
     fig.suptitle(f"{result.rocket_name}: flight path", color=INK, fontsize=12)
+    if path is not None:
+        fig.savefig(path, dpi=150)
+    return fig
+
+
+def _nose_profile(shape: str, length: float, radius: float) -> tuple[np.ndarray, np.ndarray]:
+    """Radius of the nose cone against distance from the tip."""
+    x = np.linspace(0.0, length, 60)
+    u = x / length
+    if shape == "conical":
+        y = radius * u
+    elif shape == "parabolic":
+        y = radius * (2 * u - u**2)
+    elif shape == "elliptical":
+        y = radius * np.sqrt(1 - (1 - u) ** 2)
+    else:  # tangent ogive
+        rho = (radius**2 + length**2) / (2 * radius)
+        y = np.sqrt(rho**2 - (length - x) ** 2) + radius - rho
+    return x, y
+
+
+def plot_rocket(rocket: Rocket, path: str | Path | None = None) -> Figure:
+    """Side view of the rocket with its center of gravity and center of pressure.
+
+    The fins are drawn as one pair in the plane of the page whatever the fin count.
+    """
+    airframe = rocket.airframe
+    if airframe is None:
+        raise ValueError(f"{rocket.name} has no airframe geometry to draw")
+    r, length = airframe.diameter / 2, airframe.length
+    fins, x_fin = airframe.fins, airframe.fin_position
+
+    fig, ax = plt.subplots(figsize=(9, 3.2), layout="constrained")
+    xn, yn = _nose_profile(airframe.nose.shape, airframe.nose.length, r)
+    outline_x = np.concatenate([xn, [length, length], xn[::-1]])
+    outline_y = np.concatenate([yn, [r, -r], -yn[::-1]])
+    ax.fill(outline_x, outline_y, facecolor="none", edgecolor=INK_MUTED, linewidth=1.4)
+    ax.plot([airframe.nose.length] * 2, [-r, r], color=INK_MUTED, linewidth=0.8)
+    fin_x = [
+        x_fin,
+        x_fin + fins.sweep,
+        x_fin + fins.sweep + fins.tip_chord,
+        x_fin + fins.root_chord,
+    ]
+    for sign in (1, -1):
+        fin_y = [sign * r, sign * (r + fins.span), sign * (r + fins.span), sign * r]
+        ax.fill(fin_x, fin_y, facecolor="none", edgecolor=INK_MUTED, linewidth=1.4)
+
+    burn = rocket.motor.burn_time if rocket.motor else 0.0
+    cp = rocket.center_of_pressure.position
+    cg0, cg1 = rocket.cg_at(0.0), rocket.cg_at(burn)
+    reach = r + fins.span
+    ax.plot(cg0, 0, "o", color=LINE, markersize=9)
+    ax.plot(cp, 0, "o", color=ACCENT, markersize=9)
+    ax.annotate(
+        f"CG at liftoff, {cg0:.3f} m",
+        (cg0, 0),
+        xytext=(cg0, 1.5 * reach),
+        ha="right",
+        color=INK,
+        fontsize=10,
+        arrowprops={"arrowstyle": "-", "color": INK_MUTED, "linewidth": 0.8},
+    )
+    ax.annotate(
+        f"CP, {cp:.3f} m",
+        (cp, 0),
+        xytext=(cp, 1.5 * reach),
+        ha="left",
+        color=INK,
+        fontsize=10,
+        arrowprops={"arrowstyle": "-", "color": INK_MUTED, "linewidth": 0.8},
+    )
+    if rocket.motor and abs(cg1 - cg0) > 1e-6:
+        ax.plot(cg1, 0, "o", markerfacecolor="none", markeredgecolor=LINE, markersize=9)
+        ax.annotate(
+            f"CG at burnout, {cg1:.3f} m",
+            (cg1, 0),
+            xytext=(cg1, -1.7 * reach),
+            ha="right",
+            color=INK,
+            fontsize=10,
+            arrowprops={"arrowstyle": "-", "color": INK_MUTED, "linewidth": 0.8},
+        )
+
+    ax.set_aspect("equal")
+    ax.set_xlim(-0.03 * length, 1.03 * length)
+    ax.set_ylim(-2.3 * reach, 2.3 * reach)
+    ax.set_xlabel("Distance from nose tip [m]", color=INK)
+    ax.set_yticks([])
+    for side in ("top", "right", "left"):
+        ax.spines[side].set_visible(False)
+    ax.spines["bottom"].set_color(INK_MUTED)
+    ax.tick_params(colors=INK_MUTED)
+    margin0, margin1 = rocket.static_margin_at(0.0), rocket.static_margin_at(burn)
+    fig.suptitle(
+        f"{rocket.name}: static margin {margin0:.2f} cal at liftoff, {margin1:.2f} cal at burnout",
+        color=INK,
+        fontsize=12,
+    )
     if path is not None:
         fig.savefig(path, dpi=150)
     return fig

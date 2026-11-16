@@ -16,6 +16,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     sim.add_argument("--plot", metavar="PNG", help="save altitude/speed/acceleration plot")
     sim.add_argument("--csv", metavar="CSV", help="save the full time history")
     sim.add_argument("--trajectory", metavar="PNG", help="save the flight path plot")
+    sim.add_argument("--drawing", metavar="PNG", help="save a side view with CG and CP marked")
 
     args = parser.parse_args(argv)
     if args.command == "simulate":
@@ -40,26 +41,43 @@ def _simulate(args: argparse.Namespace) -> int:
         print(f"Simulation failed: {exc}", file=sys.stderr)
         return 1
     print(result)
+    margin = result.static_margin_at("rail_exit")
+    if margin is not None:
+        print(f"Stability: {_stability_verdict(margin)}")
     if args.csv:
         result.to_csv(args.csv)
         print(f"Wrote {args.csv}")
-    if args.plot:
+    if args.plot or args.trajectory or args.drawing:
         import matplotlib
 
         matplotlib.use("Agg")
-        from .plots import plot_flight
+        from .plots import plot_flight, plot_rocket, plot_trajectory
 
-        plot_flight(result, args.plot)
-        print(f"Wrote {args.plot}")
-    if args.trajectory:
-        import matplotlib
-
-        matplotlib.use("Agg")
-        from .plots import plot_trajectory
-
-        plot_trajectory(result, args.trajectory)
-        print(f"Wrote {args.trajectory}")
+        if args.plot:
+            plot_flight(result, args.plot)
+            print(f"Wrote {args.plot}")
+        if args.trajectory:
+            plot_trajectory(result, args.trajectory)
+            print(f"Wrote {args.trajectory}")
+        if args.drawing:
+            if cfg.rocket.airframe is None:
+                print("No drawing: the config has no [nose], [body] and [fins]", file=sys.stderr)
+                return 1
+            plot_rocket(cfg.rocket, args.drawing)
+            print(f"Wrote {args.drawing}")
     return 0
+
+
+def _stability_verdict(margin: float) -> str:
+    """Rule-of-thumb reading of the static margin at rail exit, in calibers."""
+    at = f"{margin:.2f} cal at rail exit"
+    if margin < 0:
+        return f"UNSTABLE, {at}: the center of pressure is ahead of the center of gravity"
+    if margin < 1:
+        return f"marginal, {at}: the usual target is 1 to 2 cal"
+    if margin <= 2.5:
+        return f"stable, {at}"
+    return f"overstable, {at}: expect strong weathercocking in wind"
 
 
 if __name__ == "__main__":
