@@ -1,4 +1,4 @@
-"""Command-line interface: ``apogee simulate config.toml``."""
+"""Command-line interface: ``apogee simulate``, ``apogee sweep`` and ``apogee optimize``."""
 
 from __future__ import annotations
 
@@ -18,10 +18,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     sim.add_argument("--trajectory", metavar="PNG", help="save the flight path plot")
     sim.add_argument("--drawing", metavar="PNG", help="save a side view with CG and CP marked")
 
+    swp = sub.add_parser("sweep", help="fly every design on a study's grid")
+    swp.add_argument("study", help="path to a design study (.toml)")
+    swp.add_argument("--csv", metavar="CSV", help="save every design and its metrics")
+    swp.add_argument("--plot", metavar="PNG", help="save a plot of the design space")
+
+    opt = sub.add_parser("optimize", help="find the best design that meets a study's limits")
+    opt.add_argument("study", help="path to a design study (.toml)")
+    opt.add_argument(
+        "--plot", metavar="PNG", help="also sweep the grid and save a plot with the optimum"
+    )
+
     args = parser.parse_args(argv)
-    if args.command == "simulate":
-        return _simulate(args)
-    return 1
+    commands = {"simulate": _simulate, "sweep": _sweep, "optimize": _optimize}
+    return commands[args.command](args)
 
 
 def _simulate(args: argparse.Namespace) -> int:
@@ -66,6 +76,40 @@ def _simulate(args: argparse.Namespace) -> int:
             plot_rocket(cfg.rocket, args.drawing)
             print(f"Wrote {args.drawing}")
     return 0
+
+
+def _sweep(args: argparse.Namespace) -> int:
+    from .study import Study
+
+    result = Study.from_file(args.study).sweep()
+    print(result)
+    if args.csv:
+        result.to_csv(args.csv)
+        print(f"Wrote {args.csv}")
+    if args.plot:
+        _save_sweep_plot(result, args.plot)
+    return 0 if result.best is not None else 1
+
+
+def _optimize(args: argparse.Namespace) -> int:
+    from .study import Study
+
+    study = Study.from_file(args.study)
+    optimum = study.optimize()
+    print(optimum)
+    if args.plot:
+        _save_sweep_plot(study.sweep(), args.plot, optimum)
+    return 0 if optimum.feasible else 1
+
+
+def _save_sweep_plot(result, path: str, optimum=None) -> None:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    from .plots import plot_sweep
+
+    plot_sweep(result, path, optimum)
+    print(f"Wrote {path}")
 
 
 def _stability_verdict(margin: float) -> str:

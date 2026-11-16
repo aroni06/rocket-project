@@ -1,0 +1,40 @@
+# Choose the motor and fin span of the dual-deploy example for the highest flight
+# the field allows.
+#
+# Smaller fins are lighter, so the rocket flies higher, until it is no longer stable.
+# A bigger motor flies higher still, but it is heavier at the tail, which moves the
+# center of gravity aft, and it can break the field's altitude ceiling.
+
+name = "Motor and fin span"
+base = "../configs/example_dual_deploy.toml"
+
+[objective]
+metric = "apogee_m"
+goal = "maximize"
+
+[[variable]]
+path = "motor.file"            # relative to this file
+values = [
+    "../data/motors/Synthetic_H120.eng",
+    "../data/motors/Synthetic_H250.eng",
+    "../data/motors/Synthetic_I300.eng",
+]
+
+[[variable]]
+path = "fins.span_m"
+min = 0.040
+max = 0.100
+steps = 13
+
+[[constraint]]
+metric = "rail_exit_static_margin_cal"
+min = 1.0
+max = 2.5
+
+[[constraint]]
+metric = "rail_exit_speed_mps"
+min = 15.0
+
+[[constraint]]
+metric = "apogee_m"             # the launch field's altitude ceiling
+max = 1100.0

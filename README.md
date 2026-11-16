@@ -7,11 +7,12 @@
 **A 2D rocket flight simulator for model and high-power rockets, written in Python.** From a
 rocket's geometry, a motor thrust curve and its parachutes, it predicts apogee, max velocity,
 acceleration and dynamic pressure, rail exit speed, static margin, parachute deployment
-conditions, landing speed and wind drift.
+conditions, landing speed and wind drift. It can then sweep any of those inputs or search for the
+best design that meets a set of limits: which motor, how much fin, what size parachutes.
 
-> **Status: work in progress.** The flight model, parachute recovery and stability (milestones
-> 1 to 4) are done and checked against closed-form solutions and hand calculations. OpenRocket
-> validation and the design optimizer are next; see the [roadmap](#roadmap).
+> **Status: work in progress.** The flight model, parachute recovery, stability and the design
+> optimizer are done and checked against closed-form solutions and hand calculations.
+> Validation against OpenRocket is next; see the [roadmap](#roadmap).
 
 ![Side view of the example rocket with CG and CP](docs/images/example_rocket.png)
 
@@ -37,8 +38,8 @@ pytest
 ```
 Motor: Synthetic_H250 (H, 260.8 N s, 1.32 s burn)
 Flight summary: Example L1 rocket, dual deploy
-  Apogee                                   896.58 m
-  Max speed                                170.48 m/s
+  Apogee                                   896.63 m
+  Max speed                                170.49 m/s
   Max ascent acceleration                   17.83 g
   Rail exit speed                           24.24 m/s
   Rail exit static margin                    1.99 cal
@@ -46,7 +47,7 @@ Flight summary: Example L1 rocket, dual deploy
   Main deploy altitude                     150.00 m
   Main opening load (upper bound)            8.88 g
   Landing descent rate                       4.38 m/s
-  Landing downrange                         88.62 m
+  Landing downrange                         88.65 m
   ...
 Stability: stable, 1.99 cal at rail exit
 ```
@@ -61,8 +62,8 @@ center of gravity are summed from the parts, or you can give measured values wit
 and `dry_cg_m`. Drag is a constant `cd` or a `cd_file` CSV of Mach number against drag
 coefficient, for example one exported from OpenRocket. Motors are RASP `.eng`
 files, the format published by [thrustcurve.org](https://www.thrustcurve.org). The bundled
-`Synthetic_H250.eng` is a made-up curve so the example runs out of the box; download a real
-`.eng` for real predictions.
+`Synthetic_*.eng` motors are made-up curves so the examples run out of the box; download real
+`.eng` files for real predictions.
 
 From Python:
 
@@ -73,6 +74,116 @@ cfg = load_config("configs/example_l1.toml")
 result = simulate(cfg.rocket, cfg.environment, cfg.rail)
 print(result.apogee, result.rail_exit_speed, result.landing_descent_rate)
 print(result.static_margin_at("rail_exit"), cfg.rocket.center_of_pressure.position)
+```
+
+## Design studies
+
+A study file names the config values that are free to change, one metric to optimize and the
+limits a design has to meet. `apogee sweep` flies every design on a grid; `apogee optimize`
+searches the ranges continuously and tries every entry of each list.
+
+```toml
+# studies/recovery.toml
+base = "../configs/example_dual_deploy.toml"
+
+[objective]
+metric = "descent_drift_m"     # distance drifted between apogee and landing
+goal = "minimize"              # or "maximize", or "target" with a value
+
+[[variable]]
+path = "parachute.drogue.diameter_m"
+min = 0.20
+max = 0.60
+steps = 9                      # grid points when swept
+
+[[variable]]
+path = "parachute.main.diameter_m"
+min = 0.60
+max = 1.40
+steps = 9
+
+[[constraint]]
+metric = "landing_descent_rate_mps"
+max = 5.0
+
+[[constraint]]
+metric = "main_opening_load_g"
+max = 12.0
+```
+
+```bash
+apogee optimize studies/recovery.toml --plot recovery.png
+```
+
+```
+Optimum: Recovery sizing (minimize descent_drift_m)
+  parachute.drogue.diameter_m               0.2282
+  parachute.main.diameter_m                 0.7998
+  descent_drift_m                           232.66
+  landing_descent_rate_mps                    5.00  (at most 5)
+  main_opening_load_g                        12.00  (at most 12)
+Limited by
+  landing_descent_rate_mps at its maximum of 5
+  main_opening_load_g at its maximum of 12
+Flights simulated: 107
+```
+
+![Descent drift over drogue and main parachute diameter](docs/images/study_recovery.png)
+
+*Smaller parachutes drift less, until the rocket lands too fast or the main opens too hard. The
+optimum sits where the two limits cross, and matches a hand calculation from the terminal
+velocity formula to 0.1% (it is one of the tests).*
+
+A variable can also be a list of choices, such as motor files.
+[`studies/motor_and_fins.toml`](studies/motor_and_fins.toml) picks a motor and a fin span for the
+highest flight under a 1100 m field ceiling:
+
+```
+Optimum: Motor and fin span (maximize apogee_m)
+  motor.file                            Synthetic_H250
+  fins.span_m                              0.05253
+  apogee_m                                  908.83
+  rail_exit_static_margin_cal                 1.00  (1 to 2.5)
+  rail_exit_speed_mps                        24.46  (at least 15)
+  apogee_m                                  908.83  (at most 1100)
+Limited by
+  rail_exit_static_margin_cal at its minimum of 1
+Best design for each choice
+  Synthetic_H250                            908.83
+  Synthetic_H120                            784.88
+  Synthetic_I300                           1307.49  (breaks a constraint)
+Flights simulated: 319
+```
+
+![Apogee against fin span for three motors](docs/images/study_motor_and_fins.png)
+
+*Smaller fins are lighter, so every motor flies higher with less fin, until the static margin
+drops below 1 caliber. The biggest motor is ruled out because it flies through the ceiling.*
+
+Variables are addressed by their path in the config (`fins.span_m`, `rail.angle_deg`,
+`motor.file`, `parachute.main.diameter_m`, `mass.ballast.mass_kg`). Objectives and constraints
+can use any number in the flight summary, plus `liftoff_mass_kg`, `descent_drift_m`,
+`landing_distance_m` and `min_static_margin_cal`. `apogee sweep study.toml --csv designs.csv`
+writes every design and all of its metrics.
+
+The optimizer is SLSQP from SciPy, started from the best few of a Latin hypercube sample, with
+variables and constraints scaled to order one and gradients from central differences. Every
+flight is cached, so a gradient costs two flights per variable however many constraints there
+are. From Python a study can wrap any function, not only a config:
+
+```python
+from apogee import Constraint, Objective, Study, Variable
+
+study = Study.from_file("studies/recovery.toml")
+best = study.optimize()
+print(best.values, best.metrics["descent_drift_m"], best.active)
+
+custom = Study(
+    evaluate=my_function,  # dict of values -> dict of metrics
+    variables=[Variable("mass_kg", 0.5, 2.0)],
+    objective=Objective("apogee_m", "maximize"),
+    constraints=[Constraint("rail_exit_speed_mps", lower=15.0)],
+)
 ```
 
 ## Model
@@ -97,6 +208,7 @@ $$
 | Gravity | Inverse-square, g = g0 (R / (R + h))^2 |
 | Attitude | Along the rail until rail exit, then along the air-relative velocity (zero angle of attack) |
 | Wind | Constant horizontal wind |
+| Design studies | Grid sweeps over any config values; constrained optimization with multi-start SLSQP over ranges, enumerating lists of choices such as motors |
 | Parachutes | Drag 1/2 rho v^2 Cd A per canopy against the air-relative velocity; triggered at apogee, at an altitude, or by motor ejection delay; drogues stay attached after the main opens |
 
 The flight is integrated phase by phase with SciPy's `solve_ivp` (DOP853, adaptive step), and
@@ -114,6 +226,11 @@ profiles and gusts, Earth rotation, multi-stage vehicles.
   (no transitions or boat tails yet).
 - The nose cone's own center of gravity defaults to 2/3 of its length from the tip. Weigh and
   balance real parts, or give the whole rocket's measured `dry_cg_m`.
+- The drag coefficient is an input and does not change with the geometry. A design study
+  therefore sees fin size through mass and stability only, not through fin drag, and
+  understates how much smaller fins help. A component drag build-up would fix this.
+- SLSQP is a local optimizer. Several starts guard against local optima, and a sweep of the same
+  study is the independent check.
 - Parachutes inflate instantly, so the reported opening load is an upper bound on the real
   opening shock.
 - The rocket turns into the relative wind the moment it leaves the rail. A real rocket has
@@ -139,6 +256,10 @@ closed-form answer:
 | Descent in wind | Horizontal speed under canopy settles at wind speed | 1e-3 relative |
 | Barrowman center of pressure | Fin normal-force slope, fin and nose CP, total CP vs a hand calculation | 1e-5 relative |
 | Center of gravity | Component sum, motor at mid-length, forward shift during the burn | exact |
+| Optimizer, analytic problems | Constrained minimum of a quadratic, a variable at its bound, a target value, an infeasible problem | 1e-4 absolute or better |
+| Optimizer, best coasting mass | Mass that coasts highest for a fixed impulse with quadratic drag vs the closed-form optimum | 1e-6 relative in apogee |
+| Optimizer, recovery sizing | Drogue and main diameters vs hand sizing from terminal velocity and the opening-load ratio | 2e-3 and 5e-3 relative |
+| Sweep | Grid points vs single flights; best grid point never beats the optimizer | 1e-8 relative |
 
 Comparison against OpenRocket on real rocket designs comes with milestone 5.
 
@@ -154,11 +275,13 @@ src/apogee/
   components.py    nose cone, body tube, fins, point masses, dry mass and CG
   aero.py          Barrowman center of pressure, Cd-vs-Mach tables
   flight.py        equations of motion, phases, events, FlightResult
+  study.py         design studies: sweeps, constraints, optimizer
   config.py        TOML loader
-  plots.py         standard flight plots
-  cli.py           `apogee simulate`
+  plots.py         flight, rocket and design-space plots
+  cli.py           `apogee simulate`, `apogee sweep`, `apogee optimize`
 configs/           example rockets
-data/motors/       thrust curves
+studies/           example design studies
+data/motors/       thrust curves (synthetic, for the examples)
 tests/             unit and analytic verification tests
 ```
 
@@ -169,7 +292,7 @@ tests/             unit and analytic verification tests
 - [x] 3. Recovery: single and dual deploy, landing speed, wind drift
 - [x] 4. Aerodynamics and stability: C_D(Mach) import, Barrowman CP, CG, static margin
 - [ ] 5. Validation against OpenRocket on 2 to 3 rockets
-- [ ] 6. Parameter sweeps and constrained design optimizer
+- [x] 6. Parameter sweeps and constrained design optimizer
 - [ ] 7. Flight animation, technical report and v1.0
 - [ ] 8. After v1.0: liquid and hybrid engines with throttling
 

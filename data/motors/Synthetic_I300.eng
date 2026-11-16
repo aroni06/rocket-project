@@ -1,0 +1,16 @@
+; SYNTHETIC thrust curve for examples and tests only. This is NOT a real motor.
+; It is shaped like a 38 mm I-class reload in a longer case, so design studies have
+; a bigger motor to choose from. For real analysis, download the .eng file for your
+; motor from https://www.thrustcurve.org and point your config at it.
+;
+; name  dia(mm) len(mm) delays prop(kg) total(kg) manufacturer
+Synthetic_I300 38 250 6-10-14 0.210 0.400 Example
+0.000 0.0
+0.030 340.0
+0.100 320.0
+0.500 310.0
+0.900 295.0
+1.200 270.0
+1.320 150.0
+1.400 0.0
+;

@@ -9,12 +9,14 @@ from .flight import FlightEvent, FlightResult, LaunchRail, simulate
 from .motor import Motor, parse_eng
 from .recovery import Parachute
 from .rocket import Rocket
+from .study import Constraint, Objective, Study, Variable
 
 __all__ = [
     "Airframe",
     "BodyTube",
     "CdTable",
     "ConstantAtmosphere",
+    "Constraint",
     "Environment",
     "FinSet",
     "FlightEvent",
@@ -22,10 +24,13 @@ __all__ = [
     "LaunchRail",
     "Motor",
     "NoseCone",
+    "Objective",
     "Parachute",
     "PointMass",
     "Rocket",
     "StandardAtmosphere",
+    "Study",
+    "Variable",
     "barrowman",
     "load_config",
     "parse_eng",
