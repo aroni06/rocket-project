@@ -17,6 +17,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     sim.add_argument("--csv", metavar="CSV", help="save the full time history")
     sim.add_argument("--trajectory", metavar="PNG", help="save the flight path plot")
     sim.add_argument("--drawing", metavar="PNG", help="save a side view with CG and CP marked")
+    sim.add_argument("--animation", metavar="GIF", help="save an animated flight path")
 
     swp = sub.add_parser("sweep", help="fly every design on a study's grid")
     swp.add_argument("study", help="path to a design study (.toml)")
@@ -57,7 +58,7 @@ def _simulate(args: argparse.Namespace) -> int:
     if args.csv:
         result.to_csv(args.csv)
         print(f"Wrote {args.csv}")
-    if args.plot or args.trajectory or args.drawing:
+    if args.plot or args.trajectory or args.drawing or args.animation:
         import matplotlib
 
         matplotlib.use("Agg")
@@ -69,6 +70,11 @@ def _simulate(args: argparse.Namespace) -> int:
         if args.trajectory:
             plot_trajectory(result, args.trajectory)
             print(f"Wrote {args.trajectory}")
+        if args.animation:
+            from .animation import animate_flight
+
+            animate_flight(result, args.animation)
+            print(f"Wrote {args.animation}")
         if args.drawing:
             if cfg.rocket.airframe is None:
                 print("No drawing: the config has no [nose], [body] and [fins]", file=sys.stderr)
