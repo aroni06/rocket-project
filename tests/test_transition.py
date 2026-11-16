@@ -4,8 +4,14 @@ import math
 
 import pytest
 
-from apogee import Airframe, BodyTube, FinSet, NoseCone, Transition, load_config
-from apogee.aero import DragBuildup, barrowman, base_drag_coefficient, skin_friction_coefficient
+from apogee import Airframe, BodyTube, FinSet, LaunchLug, NoseCone, Transition, load_config
+from apogee.aero import (
+    DragBuildup,
+    barrowman,
+    base_drag_coefficient,
+    skin_friction_coefficient,
+    stagnation_drag_coefficient,
+)
 from apogee.config import build_config, read_config
 
 MACH, UNIT_REYNOLDS = 0.3, 7.0e6
@@ -224,3 +230,44 @@ def test_config_with_only_a_transition_is_rejected(example_config, tmp_path):
     data["transition"] = {"length_m": 0.05}
     with pytest.raises(ValueError, match="needs all of"):
         build_config(data, tmp_path)
+
+
+def test_launch_lug_adds_stagnation_drag_on_its_frontal_area():
+    plain = airframe()
+    lugged = airframe()
+    lugged.lug = LaunchLug(outer_diameter=0.007, inner_diameter=0.005, count=2)
+    # Two tube walls face the flow: 2 * pi/4 * (0.007^2 - 0.005^2) = 3.7699e-5 m^2,
+    # against a body cross-section of pi/4 * 0.05^2 = 1.9635e-3 m^2.
+    assert lugged.lug.frontal_area == pytest.approx(3.7699e-5, rel=1e-4)
+    parts = DragBuildup(lugged).breakdown(MACH, UNIT_REYNOLDS)
+    bare = DragBuildup(plain).breakdown(MACH, UNIT_REYNOLDS)
+    assert bare.lug == 0.0
+    assert parts.lug == pytest.approx(
+        stagnation_drag_coefficient(MACH) * 3.7699e-5 / 1.9635e-3, rel=1e-4
+    )
+    assert parts.total == pytest.approx(bare.total + parts.lug)
+    # A rail button is solid, so all of its face counts.
+    assert LaunchLug(outer_diameter=0.01).frontal_area == pytest.approx(math.pi * 0.01**2 / 4)
+    assert barrowman(lugged).position == barrowman(plain).position
+
+
+@pytest.mark.parametrize(
+    "lug",
+    [
+        {"outer_diameter": 0.005, "inner_diameter": 0.005},
+        {"outer_diameter": 0.005, "inner_diameter": -0.001},
+        {"outer_diameter": 0.005, "count": 0},
+    ],
+)
+def test_invalid_launch_lugs_raise(lug):
+    with pytest.raises(ValueError, match="launch lug"):
+        LaunchLug(**lug)
+
+
+def test_config_reads_the_launch_lug(example_config, tmp_path):
+    data = read_config(example_config)
+    data["motor"]["file"] = str(example_config.parent / data["motor"]["file"])
+    data["lug"] = {"outer_diameter_m": 0.012, "inner_diameter_m": 0.010, "count": 2}
+    lug = build_config(data, tmp_path).rocket.airframe.lug
+    assert (lug.outer_diameter, lug.inner_diameter, lug.count) == (0.012, 0.010, 2)
+    assert load_config(example_config).rocket.airframe.lug is None

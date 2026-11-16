@@ -167,7 +167,6 @@ def compare(rocket: Rocket, result: FlightResult, sim: OpenRocketSimulation) -> 
         if ours is not None and theirs is not None and np.isfinite(ours) and np.isfinite(theirs):
             rows.append(Comparison(label, unit, float(ours), float(theirs)))
 
-    t_rod = sim.events.get("launchrod")
     t_burnout = sim.events.get("burnout")
     columns = sim.columns
 
@@ -175,28 +174,22 @@ def compare(rocket: Rocket, result: FlightResult, sim: OpenRocketSimulation) -> 
         add("Liftoff mass", "kg", rocket.liftoff_mass, sim["Mass"][0])
         if t_burnout is not None:
             add("Burnout mass", "kg", rocket.mass_at(t_burnout), sim.at("Mass", t_burnout))
-    if rocket.airframe is not None:
-        if "CG location" in columns:
-            add("CG at liftoff", "m", rocket.cg_at(0.0), sim["CG location"][0])
-            if t_burnout is not None:
-                add(
-                    "CG at burnout",
-                    "m",
-                    rocket.cg_at(t_burnout),
-                    sim.at("CG location", t_burnout),
-                )
-        if "CP location" in columns and t_rod is not None:
-            # OpenRocket's CP moves a little with angle of attack and speed. Take it once
-            # the rocket has settled into the airflow, halfway from rod to burnout.
-            t_cp = 0.5 * (t_rod + t_burnout) if t_burnout is not None else t_rod
+    if rocket.airframe is not None and "CG location" in columns:
+        add("CG at liftoff", "m", rocket.cg_at(0.0), sim["CG location"][0])
+        if t_burnout is not None:
+            add("CG at burnout", "m", rocket.cg_at(t_burnout), sim.at("CG location", t_burnout))
+    if rocket.airframe is not None and "Total velocity" in columns:
+        fastest = int(np.nanargmax(sim["Total velocity"]))
+        if "CP location" in columns:
+            # OpenRocket's CP moves with angle of attack. Take it at top speed, where the
+            # rocket is flying straight and Barrowman's small-angle value applies.
             add(
                 "Center of pressure",
                 "m",
                 rocket.center_of_pressure.position,
-                sim.at("CP location", t_cp),
+                sim["CP location"][fastest],
             )
         if {"Drag coefficient", "Mach number", "Reynolds number"} <= columns.keys():
-            fastest = int(np.nanargmax(sim["Total velocity"]))
             add(
                 "Drag coefficient at top speed",
                 "",
@@ -206,8 +199,7 @@ def compare(rocket: Rocket, result: FlightResult, sim: OpenRocketSimulation) -> 
                 ),
                 sim["Drag coefficient"][fastest],
             )
-    if t_rod is not None:
-        add("Rail exit speed", "m/s", result.rail_exit_speed, sim.at("Total velocity", t_rod))
+    add("Rail exit speed", "m/s", result.rail_exit_speed, _rod_exit_speed(sim))
     add("Maximum speed", "m/s", result.max_speed, sim.summary.get("maxvelocity"))
     if t_burnout is not None and "burnout" in result.events:
         add(
@@ -234,6 +226,24 @@ def compare(rocket: Rocket, result: FlightResult, sim: OpenRocketSimulation) -> 
         )
     add("Flight time", "s", result.flight_time, sim.summary.get("flighttime"))
     return rows
+
+
+def _rod_exit_speed(sim: OpenRocketSimulation) -> float | None:
+    """OpenRocket's speed as the rocket passes the end of the rod.
+
+    Its own figure is the speed at the first time step past the rod, which can be several
+    percent further on while the motor is at peak thrust. Interpolate to the rod's length.
+    """
+    rod = sim.conditions.get("launchrodlength")
+    if rod is None or "Total velocity" not in sim.columns:
+        return None
+    travelled = sim["Altitude"]
+    if "Lateral distance" in sim.columns:
+        travelled = np.hypot(travelled, sim["Lateral distance"])
+    climbing = sim.time <= sim.events.get("apogee", sim.time[-1])
+    if not np.any(travelled[climbing] >= rod):
+        return None
+    return float(np.interp(rod, travelled[climbing], sim["Total velocity"][climbing]))
 
 
 def format_comparison(rows: list[Comparison]) -> str:

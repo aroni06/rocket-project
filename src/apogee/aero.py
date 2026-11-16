@@ -214,6 +214,7 @@ class DragBreakdown:
     base: float
     fin_pressure: float
     transition_pressure: float = 0.0
+    lug: float = 0.0
 
     @property
     def total(self) -> float:
@@ -224,6 +225,7 @@ class DragBreakdown:
             + self.base
             + self.fin_pressure
             + self.transition_pressure
+            + self.lug
         )
 
 
@@ -241,11 +243,12 @@ class DragBuildup:
       it tapers over more than three times the change in diameter)
     - **base drag** from the wake behind the flat aft end
     - **fin pressure drag** on the leading and trailing edges, depending on the profile
+    - **launch lug drag**, the stagnation pressure on the area the lugs present to the
+      airflow (the tube walls; the air flows through the bore)
 
     It is subsonic: there is no wave drag, so it underpredicts above about Mach 0.8
     (``SUBSONIC_LIMIT``).
-    Launch lugs and rail buttons are not included, and the base drag is not reduced
-    while the motor is burning.
+    The base drag is not reduced while the motor is burning.
 
     Skin friction depends on the Reynolds number, which depends on speed and altitude and
     not only on Mach number, so the flight model calls :meth:`at`. Calling the object with
@@ -306,6 +309,7 @@ class DragBuildup:
             0.8 * math.sin(airframe.nose.joint_angle(d_nose / 2.0)) ** 2 * (d_nose / d) ** 2
         )
         self._fin_frontal = fins.count * fins.thickness * fins.span / self._reference
+        self._lug_frontal = airframe.lug.frontal_area / self._reference if airframe.lug else 0.0
         self._sweep_factor = math.cos(fins.leading_edge_sweep) ** 2
         self._profile = fins.profile
 
@@ -337,6 +341,7 @@ class DragBuildup:
             base=base * self._base_share,
             fin_pressure=(leading * self._sweep_factor + trailing) * self._fin_frontal,
             transition_pressure=self._shoulder_pressure + base * self._boattail_share,
+            lug=stagnation_drag_coefficient(mach) * self._lug_frontal,
         )
 
     def at(self, mach: float, unit_reynolds: float) -> float:

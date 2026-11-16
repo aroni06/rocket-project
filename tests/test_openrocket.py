@@ -1,6 +1,7 @@
 """Reading OpenRocket simulations, and the validation case that ships with the repo."""
 
 import importlib.util
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -16,7 +17,20 @@ from apogee.openrocket import (
     read_simulations,
 )
 
-CASE = Path(__file__).resolve().parents[1] / "validation" / "ae100"
+VALIDATION = Path(__file__).resolve().parents[1] / "validation"
+CASE = VALIDATION / "ae100"
+SIMPLE = VALIDATION / "simple_model_rocket"
+
+
+def _load(path: Path):
+    """Import a validation script, which lives outside the package."""
+    name = f"validation_{path.parent.name}_{path.stem}"
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
 
 MINIMAL = """<?xml version='1.0' encoding='utf-8'?>
 <openrocket version="1.9" creator="OpenRocket 23.09">
@@ -196,12 +210,7 @@ def test_cli_compare_prints_the_table_and_saves_the_plot(tmp_path, capsys):
 
 
 def test_real_flight_is_explained_by_a_strong_wind_or_a_heavier_rocket():
-    spec = importlib.util.spec_from_file_location("ae100_flight", CASE / "flight.py")
-    module = importlib.util.module_from_spec(spec)
-    import sys
-
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
+    module = _load(CASE / "flight.py")
     fit, flight, _, _ = module.analyse()
     assert 7.5 < fit.wind < 9.0  # m/s
     assert fit.rms < 1.5  # metres, over a 65 m climb
@@ -210,3 +219,82 @@ def test_real_flight_is_explained_by_a_strong_wind_or_a_heavier_rocket():
     assert 0.35 < fit.chute_cd < 0.5
     assert 0.06 < fit.extra_mass < 0.10
     assert fit.fitted.landing_descent_rate == pytest.approx(fit.descent_rate, rel=0.02)
+
+
+def test_rod_exit_speed_is_taken_at_the_end_of_the_rod_not_the_next_time_step(case):
+    # OpenRocket reports the speed at the first step past the rod. For this rocket that is
+    # 5.7 cm and 1% further on; at an A8's peak thrust it is 2.5%.
+    _, result, sim = case
+    rows = {row.label: row for row in compare(*case)}
+    assert rows["Rail exit speed"].openrocket < sim.summary["launchrodvelocity"]
+    assert abs(rows["Rail exit speed"].percent) < 0.3
+
+
+# The simple model rocket: OpenRocket's own example design, on five motor configurations.
+SIMPLE_TOLERANCE = {
+    "Liftoff mass": 1.0,  # OpenRocket stores mass to the gram, 1.5% of this rocket
+    "CG at liftoff": 0.3,
+    "Center of pressure": 2.0,
+    "Drag coefficient at top speed": 3.0,
+    "Rail exit speed": 0.3,
+    "Maximum speed": 0.6,
+    "Apogee": 2.5,
+    "Time to apogee": 2.0,
+    "Descent rate at landing": 2.0,
+    "Flight time": 2.5,
+}
+
+
+@pytest.fixture(scope="module")
+def simple_cases():
+    return _load(SIMPLE / "compare.py").fly_all()
+
+
+def test_simple_model_rocket_matches_openrocket_on_all_five_motors(simple_cases):
+    assert [label for label, *_ in simple_cases] == ["A8-3", "B4-4", "C6-3", "C6-5", "C6-7"]
+    for label, rocket, result, sim in simple_cases:
+        rows = {row.label: row for row in compare(rocket, result, sim)}
+        for quantity, limit in SIMPLE_TOLERANCE.items():
+            percent = rows[quantity].percent
+            assert abs(percent) < limit, f"{label} {quantity}: {percent:+.2f}%"
+
+
+def test_simple_model_rocket_apogee_is_low_by_a_similar_amount_on_every_motor(simple_cases):
+    # The apogees span a factor of six. A difference that stays between 0 and 2.5% low on
+    # all of them is a property of the model (the turn into the wind), not a coincidence.
+    errors = [
+        100 * (result.apogee / sim.summary["maxaltitude"] - 1) for _, _, result, sim in simple_cases
+    ]
+    assert all(-2.5 < error < 0 for error in errors)
+    apogees = [sim.summary["maxaltitude"] for *_, sim in simple_cases]
+    assert max(apogees) / min(apogees) > 6
+
+
+def test_component_masses_add_up_to_openrockets_dry_mass(simple_cases):
+    # OpenRocket's total minus its motor, both recovered to a few hundredths of a gram by
+    # the method in make_motors.py, is 48.1 to 48.3 g on every configuration.
+    _, rocket, _, _ = simple_cases[0]
+    assert rocket.dry_mass == pytest.approx(0.04822, abs=2e-5)
+    assert rocket.airframe.cg == pytest.approx(0.2058, abs=2e-4)
+
+
+def test_motor_rebuild_recovers_the_published_c6():
+    motors = _load(SIMPLE / "make_motors.py")
+    sim = read_simulations(SIMPLE / "simple_model_rocket.ork")[motors.C6_SIMULATION]
+    t, f, loaded, propellant = motors.rebuild(sim)
+    published = motors.Motor.from_eng(SIMPLE / "Estes_C6.eng")
+    impulse = float(np.sum(0.5 * (f[1:] + f[:-1]) * np.diff(t)))
+    assert impulse == pytest.approx(published.total_impulse, rel=2e-3)
+    assert loaded == pytest.approx(published.loaded_mass, abs=5e-5)
+    assert propellant == pytest.approx(published.propellant_mass, abs=5e-5)
+    assert t[-1] == pytest.approx(published.burn_time)
+    # The committed A8 and B4 files are what the script writes.
+    for name, index, _ in motors.MOTORS:
+        t, f, loaded, propellant = motors.rebuild(
+            read_simulations(SIMPLE / "simple_model_rocket.ork")[index]
+        )
+        committed = motors.Motor.from_eng(SIMPLE / f"Estes_{name}.eng")
+        assert committed.loaded_mass == pytest.approx(loaded, abs=1e-5)
+        assert committed.total_impulse == pytest.approx(
+            float(np.sum(0.5 * (f[1:] + f[:-1]) * np.diff(t))), rel=1e-3
+        )

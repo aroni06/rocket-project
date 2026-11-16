@@ -201,6 +201,30 @@ class FinSet:
 
 
 @dataclass
+class LaunchLug:
+    """Launch lugs or rail buttons, for their drag. Their mass goes in as a point mass.
+
+    A lug is a short tube on the side of the body that slides over the launch rod. Leave
+    ``inner_diameter`` at zero for a rail button or anything else solid.
+    """
+
+    outer_diameter: float
+    inner_diameter: float = 0.0
+    count: int = 1
+
+    def __post_init__(self) -> None:
+        if not 0 <= self.inner_diameter < self.outer_diameter:
+            raise ValueError("launch lug needs 0 <= inner diameter < outer diameter")
+        if self.count < 1:
+            raise ValueError("launch lug count must be at least 1")
+
+    @property
+    def frontal_area(self) -> float:
+        """Area facing the airflow: the tube walls, or the whole face if solid [m^2]."""
+        return self.count * math.pi / 4.0 * (self.outer_diameter**2 - self.inner_diameter**2)
+
+
+@dataclass
 class PointMass:
     """Anything with mass and no aerodynamic effect: recovery gear, avionics, ballast."""
 
@@ -228,6 +252,7 @@ class Airframe:
     mass_override: float | None = None
     cg_override: float | None = None
     transition: Transition | None = None
+    lug: LaunchLug | None = None
 
     def __post_init__(self) -> None:
         stepped = not math.isclose(self.nose_diameter, self.body.diameter, rel_tol=1e-9)

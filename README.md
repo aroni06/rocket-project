@@ -12,9 +12,10 @@ best design that meets a set of limits: which motor, how much fin, what size par
 
 > **Status: work in progress.** The flight model, parachute recovery, stability, the design
 > optimizer and the flight animation are done. The physics is checked against closed-form
-> solutions and hand calculations, and against OpenRocket and a real flight for one rocket so
-> far: apogee within 2.4% of OpenRocket's, drag coefficient within 2%. See
-> [validation](#validation) and the [roadmap](#roadmap).
+> solutions and hand calculations, and against OpenRocket on two rockets and six flights:
+> apogee within 2.4% of OpenRocket's every time, drag coefficient within 3%. One of the rockets
+> is also compared with its real flight data. See [validation](#validation) and the
+> [roadmap](#roadmap).
 
 ![Animated flight of the example rocket](docs/images/example_flight.gif)
 
@@ -64,7 +65,8 @@ parachute opens on a trigger plus an optional delay: `apogee`, descending throug
 The `[nose]`, `[body]`, `[fins]` and `[[mass]]` sections describe the airframe. Dry mass and
 center of gravity are summed from the parts, or you can give measured values with `dry_mass_kg`
 and `dry_cg_m`. A nose cone wider or narrower than the body tube gets its own `diameter_m` and
-a `[transition]` to the tube. Drag is one of three things: a `[drag]` table, which estimates the drag
+a `[transition]` to the tube, and a `[lug]` table adds the drag of launch lugs. Drag is one of
+three things: a `[drag]` table, which estimates the drag
 coefficient from the geometry; a constant `cd`; or a `cd_file` CSV of Mach number against drag
 coefficient, for example one exported from OpenRocket. Motors are RASP `.eng`
 files, the format published by [thrustcurve.org](https://www.thrustcurve.org). The bundled
@@ -208,7 +210,7 @@ $$
 | Mass | Propellant burns in proportion to delivered impulse: m_p(t) = m_p0 (1 - I(t) / I_total) |
 | Atmosphere | 1976 U.S. Standard Atmosphere, 0 to 32 km, launch-site elevation and temperature offset |
 | Drag | Estimated from the geometry (below), or a constant C_D, a C_D-vs-Mach table from a CSV file, or any function C_D(Mach) |
-| Drag estimate | Turbulent skin friction on the wetted area with a roughness limit (per part if they are finished differently) and compressibility correction, base drag, fin edge drag by profile, pressure drag for conical noses and for a transition; depends on Mach and Reynolds number along the flight |
+| Drag estimate | Turbulent skin friction on the wetted area with a roughness limit (per part if they are finished differently) and compressibility correction, base drag, fin edge drag by profile, pressure drag for conical noses and for a transition, launch lugs; depends on Mach and Reynolds number along the flight |
 | Center of pressure | Barrowman's equations for the nose cone (conical, ogive, parabolic, elliptical), a conical transition between a nose and body of different diameters, and trapezoidal fins with fin-body interference |
 | Center of gravity | Mass-weighted average of nose, transition, body tube, fins, point masses and the motor; moves forward as propellant burns |
 | Static margin | (x_CP - x_CG) / d in calibers, reported at liftoff, rail exit and burnout |
@@ -234,10 +236,10 @@ profiles and gusts, Earth rotation, multi-stage vehicles.
 - The nose cone's own center of gravity defaults to 2/3 of its length from the tip. Weigh and
   balance real parts, or give the whole rocket's measured `dry_cg_m`.
 - The drag estimate is subsonic. It has no wave drag, so above about Mach 0.8 it is too low
-  and the apogee too high; `apogee simulate` warns when a flight goes that fast. It leaves out
-  launch lugs and rail buttons, does not reduce base drag while the motor burns, and assumes a
-  fully turbulent boundary layer. It follows OpenRocket's drag coefficient within 2% on the one
-  rocket compared so far.
+  and the apogee too high; `apogee simulate` warns when a flight goes that fast. Launch lugs
+  are a simple stagnation-pressure estimate, base drag is not reduced while the motor burns,
+  and the boundary layer is assumed fully turbulent. It follows OpenRocket's drag coefficient
+  within 3% on the two rockets compared so far.
 - SLSQP is a local optimizer. Several starts guard against local optima, and a sweep of the same
   study is the independent check.
 - Parachutes inflate instantly, so the reported opening load is an upper bound on the real
@@ -245,8 +247,8 @@ profiles and gusts, Earth rotation, multi-stage vehicles.
 - The rocket turns into the relative wind the moment it leaves the rail. A real rocket has
   rotational inertia and turns more slowly, so the model overpredicts how far upwind it flies in
   a crosswind (203 m upwind at apogee in the example) and how much altitude the wind costs.
-  Against OpenRocket in a 2 m/s wind this is the largest difference: 34 m upwind against 18 m,
-  and most of a 2.4% lower apogee.
+  Against OpenRocket in a 2 m/s wind this is the largest difference: 60% to 90% further upwind
+  at apogee, and most of an apogee 0.6% to 2.4% lower.
 
 ## Verification
 
@@ -275,6 +277,7 @@ closed-form answer:
 | Optimizer, recovery sizing | Drogue and main diameters vs hand sizing from terminal velocity and the opening-load ratio | 2e-3 and 5e-3 relative |
 | Sweep | Grid points vs single flights; best grid point never beats the optimizer | 1e-8 relative |
 | Transition | Barrowman normal force and CP, boattail and shoulder pressure drag, wetted area vs hand calculations; a vanishing step recovers the plain airframe | 1e-5 relative |
+| OpenRocket, two rockets on six motors | Mass, CG, CP, drag coefficient, rail exit and top speed, apogee, descent rate vs OpenRocket's stored simulations | 0.3% to 3.5% by quantity |
 
 ## Validation
 
@@ -286,23 +289,28 @@ outputs (speeds, apogee, descent).
 apogee compare validation/ae100/config.toml validation/ae100/ae100.ork --plot comparison.png
 ```
 
-The first rocket compared is a 300 g model rocket on an Estes D12 with a nose cone wider than
-its body tube. The config is written from the OpenRocket design and nothing is tuned.
+Two rockets have been compared so far: a 300 g rocket on an Estes D12 with a nose cone wider
+than its body tube, and the example design that ships with OpenRocket on its five motor
+configurations. The configs are written from the OpenRocket designs and nothing is tuned.
 
-| | apogee | OpenRocket | difference |
-| --- | ---: | ---: | ---: |
-| Liftoff mass [kg] | 0.2997 | 0.300 | -0.1% |
-| CG at liftoff [m] | 0.1596 | 0.160 | -0.2% |
-| Center of pressure [m] | 0.2150 | 0.214 | +0.5% |
-| Drag coefficient at top speed | 0.281 | 0.282 | -0.5% |
-| Rail exit speed [m/s] | 11.92 | 12.03 | -0.9% |
-| Maximum speed [m/s] | 40.60 | 40.50 | +0.2% |
-| Apogee [m] | 107.5 | 110.2 | -2.4% |
-| Descent rate at landing [m/s] | 8.68 | 8.74 | -0.6% |
+| Rocket | Motor | apogee [m] | OpenRocket [m] | Apogee | Top speed | Drag coefficient |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| AE 100 rocket | D12-3 | 107.5 | 110.2 | -2.4% | +0.2% | -0.5% |
+| Simple model rocket | A8-3 | 50.3 | 50.6 | -0.6% | -0.1% | +0.4% |
+| | B4-4 | 134.3 | 136.2 | -1.4% | -0.2% | +2.6% |
+| | C6-3 | 276.6 | 280.2 | -1.3% | -0.4% | +1.5% |
+| | C6-5 | 313.8 | 319.5 | -1.8% | -0.4% | +1.5% |
+| | C6-7 | 316.5 | 322.8 | -1.9% | -0.4% | +1.5% |
+
+Mass, center of gravity, center of pressure and rail exit speed agree within 1% to 2% on every
+flight. The apogee is consistently a little low because the rocket turns into the wind
+instantly here and gradually in OpenRocket; see the limitations above.
+
+![Altitude against time on five motors](validation/simple_model_rocket/openrocket.png)
 
 ![Altitude, speed and drag coefficient from both simulators](validation/ae100/openrocket.png)
 
-The same rocket flew with an altimeter on a windy day and reached 65 m, not 110 m. The wind was
+The first rocket also flew with an altimeter on a windy day and reached 65 m, not 110 m. The wind was
 not measured, so the simulator is used the other way round: an 8 m/s (18 mph) wind reproduces
 the recorded climb within 0.8 m RMS. So would a rocket 79 g heavier than designed in still air,
 and the altimeter alone cannot tell the two apart.
@@ -342,7 +350,7 @@ tests/             unit and analytic verification tests
 - [x] 2. Core 2D flight model with analytic verification
 - [x] 3. Recovery: single and dual deploy, landing speed, wind drift
 - [x] 4. Aerodynamics and stability: C_D(Mach) import, Barrowman CP, CG, static margin
-- [ ] 5. Validation against OpenRocket on 2 to 3 rockets (1 done, with flight data)
+- [x] 5. Validation against OpenRocket on two rockets and six flights, one with flight data
 - [x] 6. Parameter sweeps and constrained design optimizer
 - [x] 7. Flight animation
 - [x] 8. Drag estimated from the geometry

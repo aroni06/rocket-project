@@ -66,7 +66,8 @@ def _simulate(args: argparse.Namespace) -> int:
             f"Drag: estimated from geometry, Cd {parts.total:.3f} at Mach 0.3 "
             f"(friction {parts.body_friction + parts.fin_friction:.3f}, base {parts.base:.3f}, "
             f"fin edges {parts.fin_pressure:.3f}, "
-            f"nose and transition {parts.nose_pressure + parts.transition_pressure:.3f})"
+            f"nose and transition {parts.nose_pressure + parts.transition_pressure:.3f}"
+            + (f", launch lug {parts.lug:.3f})" if parts.lug else ")")
         )
     try:
         result = simulate(cfg.rocket, cfg.environment, cfg.rail)

@@ -40,6 +40,12 @@ Example::
     # length_m = 0.03
     # mass_kg = 0.004
 
+    # Optional: launch lugs or rail buttons, for their drag (their mass is a [[mass]]).
+    # [lug]
+    # outer_diameter_m = 0.007
+    # inner_diameter_m = 0.005     # leave out for a rail button
+    # count = 1
+
     [fins]
     count = 3
     root_chord_m = 0.15
@@ -82,7 +88,7 @@ from pathlib import Path
 
 from .aero import CdTable, DragBuildup
 from .atmosphere import StandardAtmosphere
-from .components import Airframe, BodyTube, FinSet, NoseCone, PointMass, Transition
+from .components import Airframe, BodyTube, FinSet, LaunchLug, NoseCone, PointMass, Transition
 from .environment import Environment
 from .flight import LaunchRail
 from .motor import Motor
@@ -152,7 +158,7 @@ def _rocket(data: dict, base: Path, motor: Motor, parachutes: list[Parachute]) -
             raise ValueError('[drag] model must be "geometry"')
         if "cd" in cfg or "cd_file" in cfg:
             raise ValueError("give either [drag] or cd / cd_file in [rocket], not both")
-    geometry = [key for key in ("nose", "body", "fins", "transition") if key in data]
+    geometry = [key for key in ("nose", "body", "fins", "transition", "lug") if key in data]
     if not geometry:
         if drag is not None:
             raise ValueError("[drag] needs the geometry: [nose], [body] and [fins]")
@@ -170,6 +176,7 @@ def _rocket(data: dict, base: Path, motor: Motor, parachutes: list[Parachute]) -
 def _airframe(data: dict, rocket: dict) -> Airframe:
     nose, body, fins = data["nose"], data["body"], data["fins"]
     transition = data.get("transition")
+    lug = data.get("lug")
     return Airframe(
         nose=NoseCone(
             length=nose["length_m"],
@@ -207,6 +214,12 @@ def _airframe(data: dict, rocket: dict) -> Airframe:
             mass=transition.get("mass_kg", 0.0),
             cg=transition.get("cg_m"),
             roughness=transition.get("roughness_m"),
+        ),
+        lug=lug
+        and LaunchLug(
+            outer_diameter=lug["outer_diameter_m"],
+            inner_diameter=lug.get("inner_diameter_m", 0.0),
+            count=lug.get("count", 1),
         ),
     )
 

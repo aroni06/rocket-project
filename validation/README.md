@@ -5,12 +5,32 @@ folder checks it against two things that are not arithmetic: OpenRocket, the sim
 the hobby uses, and a real flight.
 
 Each case is a folder holding an OpenRocket design saved with its simulation data (`.ork`), the
-same rocket written by hand as an `apogee` config, and the motor file. Every number in the
+same rocket written by hand as an `apogee` config, and the motor files. Every number in the
 config is read off the design. Nothing is adjusted to make the results agree.
 
 ```bash
 apogee compare validation/ae100/config.toml validation/ae100/ae100.ork --plot comparison.png
 ```
+
+## Summary
+
+Two rockets, six flights, apogees from 50 m to 320 m, all in OpenRocket's default 2 m/s wind.
+
+| Rocket | Motor | apogee [m] | OpenRocket [m] | Apogee | Top speed | Drag coefficient |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| AE 100 rocket | D12-3 | 107.5 | 110.2 | -2.4% | +0.2% | -0.5% |
+| Simple model rocket | A8-3 | 50.3 | 50.6 | -0.6% | -0.1% | +0.4% |
+| | B4-4 | 134.3 | 136.2 | -1.4% | -0.2% | +2.6% |
+| | C6-3 | 276.6 | 280.2 | -1.3% | -0.4% | +1.5% |
+| | C6-5 | 313.8 | 319.5 | -1.8% | -0.4% | +1.5% |
+| | C6-7 | 316.5 | 322.8 | -1.9% | -0.4% | +1.5% |
+
+Mass, center of gravity, center of pressure and rail exit speed agree within 1% on every flight
+(center of pressure within 2% on the A8, where OpenRocket's rocket is still flying at an angle
+at its top speed). The apogee is 0.6% to 2.4% low every time, and the reason is the same every
+time: this simulator turns the rocket into the wind instantly, so it also ends up 60% to 90%
+further upwind than OpenRocket's. That is the model's largest known error, and it is the next
+thing a pitch degree of freedom would fix.
 
 ## AE 100 rocket
 
@@ -32,9 +52,9 @@ the config does too.
 | Burnout mass [kg] | 0.2786 | 0.279 | -0.1% |
 | CG at liftoff [m] | 0.1596 | 0.160 | -0.2% |
 | CG at burnout [m] | 0.1395 | 0.139 | +0.3% |
-| Center of pressure [m] | 0.2150 | 0.214 | +0.5% |
+| Center of pressure [m] | 0.2150 | 0.213 | +0.9% |
 | Drag coefficient at top speed | 0.281 | 0.282 | -0.5% |
-| Rail exit speed [m/s] | 11.92 | 12.03 | -0.9% |
+| Rail exit speed [m/s] | 11.92 | 11.91 | +0.1% |
 | Maximum speed [m/s] | 40.60 | 40.50 | +0.2% |
 | Burnout altitude [m] | 38.51 | 38.93 | -1.1% |
 | **Apogee [m]** | **107.5** | **110.2** | **-2.4%** |
@@ -44,6 +64,9 @@ the config does too.
 | Flight time [s] | 18.19 | 18.40 | -1.1% |
 
 ![Altitude, speed and drag coefficient from both simulators](ae100/openrocket.png)
+
+OpenRocket reports the rail exit speed at its first time step past the rod (12.03 m/s here).
+The table interpolates its data to the end of the rod so both columns mean the same thing.
 
 **What agrees.** The inputs to the flight agree to better than 1%: the mass and its balance
 point, the center of pressure from Barrowman's equations including the transition, and the drag
@@ -106,3 +129,59 @@ How far to trust that number:
 The files: `ae100.ork` is the OpenRocket design with its simulation, `config.toml` the same
 rocket for this simulator, `Estes_D12.eng` the motor (NAR certification data, from
 thrustcurve.org), `altimeter.csv` the flight data with the altimeter's serial number removed.
+
+## Simple model rocket
+
+"A simple model rocket" is the example design that ships with OpenRocket (designed by Sampo
+Niskanen, OpenRocket's author): a 40 cm, 25 mm rocket with an ogive nose, three swept fins, a
+launch lug and a 30 cm parachute. Its file holds five motor configurations and a simulation of
+each, so one design gives five flights that differ sixfold in apogee. Anyone with OpenRocket
+can open the same example and check these numbers.
+
+![Side view of the simple model rocket](simple_model_rocket/rocket.png)
+
+```bash
+python validation/simple_model_rocket/compare.py --plot comparison.png
+apogee compare validation/simple_model_rocket/config.toml \
+    validation/simple_model_rocket/simple_model_rocket.ork --simulation 4
+```
+
+| Difference from OpenRocket | A8-3 | B4-4 | C6-3 | C6-5 | C6-7 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Liftoff mass | -0.7% | +0.2% | +0.5% | +0.5% | +0.5% |
+| CG at liftoff | 0.0% | 0.0% | 0.0% | 0.0% | 0.0% |
+| Center of pressure | +1.7% | +0.4% | +0.1% | -0.2% | -0.2% |
+| Drag coefficient at top speed | +0.4% | +2.6% | +1.5% | +1.5% | +1.5% |
+| Rail exit speed | 0.0% | -0.1% | 0.0% | 0.0% | 0.0% |
+| Maximum speed | -0.1% | -0.2% | -0.4% | -0.4% | -0.4% |
+| **Apogee** | **-0.6%** | **-1.4%** | **-1.3%** | **-1.8%** | **-1.9%** |
+| Time to apogee | -0.8% | -0.4% | +0.6% | -0.7% | -1.5% |
+| Descent rate at landing | +0.4% | +0.3% | -0.3% | -1.5% | -0.9% |
+
+![Altitude against time on all five motors](simple_model_rocket/openrocket.png)
+
+**The masses are computed, not copied.** This design gives no masses: OpenRocket works each one
+out from the part's dimensions and its material's density. The config does the same sum (a 2 mm
+polystyrene nose shell with its shoulder, a 1 mm cardboard tube, and so on) and arrives at a dry
+mass of 48.22 g, against 48.1 to 48.3 g recovered from OpenRocket's data, with the center of
+gravity matching to the millimetre on all three motors. OpenRocket stores the mass rounded to
+the gram, which is 1.5% of this rocket, so the mass row above is mostly that rounding.
+
+**The motors.** `Estes_C6.eng` is the published NAR certification curve and is exactly what
+OpenRocket flew (its thrust samples sit within 0.02 N RMS of the file). OpenRocket's A8 and B4
+curves are different data sets from the published files at hand, so `make_motors.py` rebuilds
+them from the thrust and motor-mass columns of the stored simulations. Applied to the C6, where
+the answer is known, that method returns the published impulse within 0.1% and both masses
+within 0.02 g.
+
+**The launch lug.** Without it the drag coefficient was 3.8% below OpenRocket's and the apogee
+0.3% above: two errors cancelling. The lug is now in the drag estimate as the stagnation
+pressure on the tube's wall area (0.033 here, where OpenRocket's more detailed model gives 0.025
+to 0.030), which puts the drag coefficient 1.5% above OpenRocket's and exposes the real apogee
+difference. Of the 1.8% on the C6-5, about 1.5% is the turn into the wind (in still air this
+simulator reaches 318.7 m, 4.9 m higher) and the rest is the slightly higher drag.
+
+The files: `simple_model_rocket.ork` is OpenRocket's example design, unchanged, saved with its
+simulations from OpenRocket 23.09 (OpenRocket is distributed under the GNU GPL).
+`config.toml` is the default C6-5 configuration; `compare.py` swaps the motor and delay for
+the other four.
