@@ -165,6 +165,7 @@ def main() -> None:
     print("The climb alone cannot tell wind from weight. No wind and a rocket")
     print(f"  {1000 * fit.extra_mass:.0f} g heavier than designed fits as well", end=" ")
     print(f"({fit.extra_mass_rms:.1f} m RMS).")
+    print("  The design's masses are the measured ones, which leaves the wind.")
 
     if args.plot:
         plot(args.plot, t, h, fit, flight)

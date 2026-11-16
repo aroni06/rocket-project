@@ -112,8 +112,9 @@ and gravity keeps bending a tilted path further over for the rest of the burn.
 How far to trust that number:
 
 - **The climb alone cannot tell wind from weight.** No wind and a rocket 79 g (26%) heavier than
-  the design fits the altimeter equally well. The wind figure assumes the rocket weighed what
-  the design says. A weight measured on the day would settle it.
+  the design fits the altimeter equally well. What rules that out is outside the data: the
+  masses in the design are the rocket's measured ones, confirmed by its builder. That leaves
+  the wind.
 - **The instant turn overstates the effect of wind**, as the OpenRocket comparison shows, so the
   real wind was probably somewhat stronger than 8 m/s if wind was the whole story. On the other
   hand a rocket with one caliber of margin at 35 degrees angle of attack is far outside the
@@ -123,8 +124,9 @@ How far to trust that number:
   recorded was about 69 m. The script converts the simulation to what the altimeter would
   read before comparing.
 - **The descent is a separate problem.** Whatever the wind, the rocket came down 40% faster
-  than a fully open 30 cm parachute with a drag coefficient of 0.8 allows. Either it was
-  heavier than the design or the parachute did not open fully.
+  than a fully open 30 cm parachute with a drag coefficient of 0.8 allows. With the mass
+  confirmed, the parachute was delivering about half its design drag: partly open, tangled,
+  or spilling air in the wind.
 
 The files: `ae100.ork` is the OpenRocket design with its simulation, `config.toml` the same
 rocket for this simulator, `Estes_D12.eng` the motor (NAR certification data, from

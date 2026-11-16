@@ -312,8 +312,9 @@ instantly here and gradually in OpenRocket; see the limitations above.
 
 The first rocket also flew with an altimeter on a windy day and reached 65 m, not 110 m. The wind was
 not measured, so the simulator is used the other way round: an 8 m/s (18 mph) wind reproduces
-the recorded climb within 0.8 m RMS. So would a rocket 79 g heavier than designed in still air,
-and the altimeter alone cannot tell the two apart.
+the recorded climb within 0.8 m RMS. A rocket 79 g heavier than designed in still air would fit
+as well, and the altimeter alone cannot tell the two apart, but the design's masses are the
+measured ones.
 
 ![Altimeter data against the simulations](validation/ae100/flight.png)
 
