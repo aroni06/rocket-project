@@ -143,10 +143,14 @@ def test_recovery_study_matches_hand_sizing():
     rocket, env = cfg.rocket, cfg.environment
     drogue, main_chute = rocket.parachutes
     mass = rocket.mass_at(1e9)
-    rho = env.atmosphere.at(env.site_elevation).density
-    body = rocket.drag_coefficient(0.0) * rocket.reference_area
+    # The body's own drag at the landing speed; it barely changes with speed down here.
+    v_land = limits["landing_descent_rate_mps"]
+    state = env.atmosphere.at(env.site_elevation)
+    body = rocket.reference_area * rocket.drag_coefficient(
+        v_land / state.speed_of_sound, v_land / state.kinematic_viscosity
+    )
 
-    total = 2 * mass * env.gravity(0.0) / (rho * limits["landing_descent_rate_mps"] ** 2)
+    total = 2 * mass * env.gravity(0.0) / (state.density * v_land**2)
     main_cda = total * limits["main_opening_load_g"] / (limits["main_opening_load_g"] + 1)
     drogue_cda = total - main_cda - body
 

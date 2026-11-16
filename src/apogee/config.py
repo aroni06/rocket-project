@@ -6,7 +6,8 @@ Example::
     name = "Example L1"
     dry_mass_kg = 1.10
     diameter_m = 0.066
-    cd = 0.45                      # or cd_file = "cd_vs_mach.csv" (columns: mach, cd)
+    cd = 0.45                      # or cd_file = "cd_vs_mach.csv" (columns: mach, cd),
+                                   # or leave both out and add a [drag] table
 
     [motor]
     file = "../data/motors/Synthetic_H200.eng"   # relative to this config file
@@ -40,6 +41,13 @@ Example::
     span_m = 0.065
     sweep_m = 0.07
     mass_kg = 0.12                 # or thickness_m and density_kgm3
+    profile = "rounded"            # edge shape for drag: square, rounded or airfoil
+
+    # Optional: estimate the drag coefficient from the geometry above instead of giving cd.
+    # Needs fins.thickness_m.
+    [drag]
+    model = "geometry"
+    roughness_m = 60e-6            # surface roughness; 60 micrometres is regular paint
 
     [[mass]]                       # recovery gear, avionics, ballast...
     name = "recovery"
@@ -64,7 +72,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from .aero import CdTable
+from .aero import CdTable, DragBuildup
 from .atmosphere import StandardAtmosphere
 from .components import Airframe, BodyTube, FinSet, NoseCone, PointMass
 from .environment import Environment
@@ -130,12 +138,22 @@ def _rocket(data: dict, base: Path, motor: Motor, parachutes: list[Parachute]) -
     cfg = data["rocket"]
     name = cfg.get("name", "rocket")
     cd = CdTable.from_csv(base / cfg["cd_file"]) if "cd_file" in cfg else cfg.get("cd", 0.5)
+    drag = data.get("drag")
+    if drag is not None:
+        if drag.get("model", "geometry") != "geometry":
+            raise ValueError('[drag] model must be "geometry"')
+        if "cd" in cfg or "cd_file" in cfg:
+            raise ValueError("give either [drag] or cd / cd_file in [rocket], not both")
     geometry = [key for key in ("nose", "body", "fins") if key in data]
     if not geometry:
+        if drag is not None:
+            raise ValueError("[drag] needs the geometry: [nose], [body] and [fins]")
         return Rocket(name, cfg["dry_mass_kg"], cfg["diameter_m"], motor, cd, parachutes)
     if len(geometry) < 3:
         raise ValueError("stability needs all of [nose], [body] and [fins]")
     airframe = _airframe(data, cfg)
+    if drag is not None:
+        cd = DragBuildup(airframe, roughness=drag.get("roughness_m", 60e-6))
     return Rocket.from_airframe(
         name, airframe, motor, cd, parachutes, data["motor"].get("position_m")
     )
@@ -165,6 +183,7 @@ def _airframe(data: dict, rocket: dict) -> Airframe:
             mass=fins.get("mass_kg"),
             thickness=fins.get("thickness_m"),
             density=fins.get("density_kgm3"),
+            profile=fins.get("profile", "rounded"),
         ),
         masses=[PointMass(m["name"], m["mass_kg"], m["position_m"]) for m in data.get("mass", [])],
         mass_override=rocket.get("dry_mass_kg"),

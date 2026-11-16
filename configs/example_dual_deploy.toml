@@ -3,9 +3,14 @@
 
 [rocket]
 name = "Example L1 rocket, dual deploy"
-cd = 0.45               # constant drag coefficient, or cd_file = "....csv"
 
-# Geometry, used for stability. Positions are metres aft of the nose tip.
+# Drag is estimated from the geometry below. The alternatives are a constant
+# cd = 0.45 or a cd_file = "....csv" in [rocket].
+[drag]
+model = "geometry"
+roughness_m = 60e-6     # regular paint
+
+# Geometry, used for stability and drag. Positions are metres aft of the nose tip.
 # Dry mass and CG are summed from the parts below.
 
 [nose]
@@ -26,6 +31,7 @@ span_m = 0.065
 sweep_m = 0.07
 thickness_m = 0.0032    # 1/8 in G10 fiberglass; mass follows the fin size
 density_kgm3 = 1830.0
+profile = "rounded"     # edge shape: square, rounded or airfoil
 
 [[mass]]
 name = "recovery gear"
