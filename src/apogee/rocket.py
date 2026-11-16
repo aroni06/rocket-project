@@ -1,8 +1,11 @@
 """Rocket definition.
 
-The airframe is a single body with a fixed dry mass and a drag coefficient that is either
-constant or a function of Mach number, plus any number of parachutes. Component geometry,
-center of gravity and center of pressure arrive with the stability model.
+For the trajectory the rocket is a point mass with a fixed dry mass and a drag coefficient
+that is either constant or a function of Mach number, plus any number of parachutes.
+
+Give it an :class:`~apogee.components.Airframe` as well and it can also report stability:
+the center of pressure (Barrowman), the center of gravity as propellant burns, and the
+static margin between them.
 """
 
 from __future__ import annotations
@@ -11,6 +14,8 @@ import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from .aero import CenterOfPressure, barrowman
+from .components import Airframe
 from .motor import Motor
 from .recovery import Parachute
 
@@ -23,6 +28,10 @@ class Rocket:
     outer diameter used as the drag reference [m]. ``cd`` is either a constant or a
     callable ``cd(mach)``. ``motor`` may be ``None`` for unpowered test cases.
     ``parachutes`` deploy in flight according to their triggers.
+
+    ``airframe`` is optional geometry for stability. ``motor_position`` is the distance
+    from the nose tip to the motor's forward end [m]; left as ``None`` the motor's aft
+    end is flush with the aft end of the body.
     """
 
     name: str
@@ -31,6 +40,30 @@ class Rocket:
     motor: Motor | None
     cd: float | Callable[[float], float] = 0.5
     parachutes: list[Parachute] = field(default_factory=list)
+    airframe: Airframe | None = None
+    motor_position: float | None = None
+
+    @classmethod
+    def from_airframe(
+        cls,
+        name: str,
+        airframe: Airframe,
+        motor: Motor | None,
+        cd: float | Callable[[float], float] = 0.5,
+        parachutes: list[Parachute] | None = None,
+        motor_position: float | None = None,
+    ) -> Rocket:
+        """Build a rocket whose dry mass and diameter come from its airframe."""
+        return cls(
+            name=name,
+            dry_mass=airframe.mass,
+            diameter=airframe.diameter,
+            motor=motor,
+            cd=cd,
+            parachutes=parachutes or [],
+            airframe=airframe,
+            motor_position=motor_position,
+        )
 
     def __post_init__(self) -> None:
         if self.dry_mass <= 0:
@@ -58,3 +91,40 @@ class Rocket:
 
     def drag_coefficient(self, mach: float) -> float:
         return float(self.cd(mach)) if callable(self.cd) else float(self.cd)
+
+    # Stability. These need an airframe; without one they raise ValueError.
+
+    def _require_airframe(self) -> Airframe:
+        if self.airframe is None:
+            raise ValueError(f"{self.name} has no airframe geometry, so stability is unknown")
+        return self.airframe
+
+    @property
+    def center_of_pressure(self) -> CenterOfPressure:
+        return barrowman(self._require_airframe())
+
+    @property
+    def motor_cg(self) -> float:
+        """Motor center of gravity aft of the nose tip [m], taken as its mid-length."""
+        airframe = self._require_airframe()
+        length = self.motor.length if self.motor else 0.0
+        front = self.motor_position
+        if front is None:
+            front = airframe.length - length
+        return front + length / 2.0
+
+    def cg_at(self, t: float) -> float:
+        """Center of gravity aft of the nose tip at time ``t`` [m].
+
+        Propellant burns away at the motor's mid-length, so the CG of an aft-mounted
+        motor moves forward during the burn.
+        """
+        airframe = self._require_airframe()
+        motor_mass = self.motor.mass_at(t) if self.motor else 0.0
+        return (self.dry_mass * airframe.cg + motor_mass * self.motor_cg) / (
+            self.dry_mass + motor_mass
+        )
+
+    def static_margin_at(self, t: float) -> float:
+        """Static margin in calibers: (x_cp - x_cg) / diameter. Positive is stable."""
+        return (self.center_of_pressure.position - self.cg_at(t)) / self.diameter
