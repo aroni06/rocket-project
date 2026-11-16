@@ -1,0 +1,32 @@
+# The same airframe flown dual deploy: a small drogue at apogee keeps the descent
+# fast and the drift short, then the main opens low for a soft landing.
+
+[rocket]
+name = "Example L1 rocket, dual deploy"
+dry_mass_kg = 1.15      # altimeter bay adds mass
+diameter_m = 0.066
+cd = 0.45
+
+[motor]
+file = "../data/motors/Synthetic_H250.eng"
+
+[environment]
+wind_speed_mps = 4.0
+
+[rail]
+length_m = 1.83
+angle_deg = 90.0
+
+[[parachute]]
+name = "drogue"
+diameter_m = 0.30
+cd = 1.5
+deploy = "apogee"
+delay_s = 1.0           # typical altimeter backup-safe delay
+
+[[parachute]]
+name = "main"
+diameter_m = 0.9
+cd = 1.5
+deploy = "altitude"
+altitude_m = 150.0
