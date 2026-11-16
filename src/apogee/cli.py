@@ -1,4 +1,4 @@
-"""Command-line interface: ``apogee simulate``, ``apogee sweep`` and ``apogee optimize``."""
+"""Command-line interface: ``apogee simulate``, ``sweep``, ``optimize`` and ``compare``."""
 
 from __future__ import annotations
 
@@ -30,8 +30,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--plot", metavar="PNG", help="also sweep the grid and save a plot with the optimum"
     )
 
+    cmp = sub.add_parser("compare", help="check a config against an OpenRocket simulation")
+    cmp.add_argument("config", help="path to a rocket config (.toml)")
+    cmp.add_argument("ork", help="OpenRocket design file (.ork) saved with its simulation data")
+    cmp.add_argument(
+        "--simulation", type=int, default=1, metavar="N", help="which simulation in the file"
+    )
+    cmp.add_argument("--plot", metavar="PNG", help="save both flights plotted together")
+
     args = parser.parse_args(argv)
-    commands = {"simulate": _simulate, "sweep": _sweep, "optimize": _optimize}
+    commands = {
+        "simulate": _simulate,
+        "sweep": _sweep,
+        "optimize": _optimize,
+        "compare": _compare,
+    }
     return commands[args.command](args)
 
 
@@ -52,7 +65,8 @@ def _simulate(args: argparse.Namespace) -> int:
         print(
             f"Drag: estimated from geometry, Cd {parts.total:.3f} at Mach 0.3 "
             f"(friction {parts.body_friction + parts.fin_friction:.3f}, base {parts.base:.3f}, "
-            f"fin edges {parts.fin_pressure:.3f}, nose {parts.nose_pressure:.3f})"
+            f"fin edges {parts.fin_pressure:.3f}, "
+            f"nose and transition {parts.nose_pressure + parts.transition_pressure:.3f})"
         )
     try:
         result = simulate(cfg.rocket, cfg.environment, cfg.rail)
@@ -119,6 +133,46 @@ def _optimize(args: argparse.Namespace) -> int:
     if args.plot:
         _save_sweep_plot(study.sweep(), args.plot, optimum)
     return 0 if optimum.feasible else 1
+
+
+def _compare(args: argparse.Namespace) -> int:
+    from .config import load_config
+    from .flight import simulate
+    from .openrocket import compare, format_comparison, read_simulation
+
+    cfg = load_config(args.config)
+    try:
+        sim = read_simulation(args.ork, args.simulation - 1)
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    try:
+        result = simulate(cfg.rocket, cfg.environment, cfg.rail)
+    except RuntimeError as exc:
+        print(f"Simulation failed: {exc}", file=sys.stderr)
+        return 1
+    theirs = sim.conditions
+    print(f"OpenRocket simulation: {sim.name}")
+    if theirs:
+        print(
+            f"  OpenRocket flew: {theirs.get('windaverage', 0.0):g} m/s wind, "
+            f"{theirs.get('launchrodlength', 0.0):g} m rod, "
+            f"launch site at {theirs.get('launchaltitude', 0.0):g} m"
+        )
+    print(
+        f"  This config has: {cfg.environment.wind_speed:g} m/s wind, "
+        f"{cfg.rail.length:g} m rod, launch site at {cfg.environment.site_elevation:g} m\n"
+    )
+    print(format_comparison(compare(cfg.rocket, result, sim)))
+    if args.plot:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        from .plots import plot_comparison
+
+        plot_comparison(cfg.rocket, result, sim, args.plot)
+        print(f"Wrote {args.plot}")
+    return 0
 
 
 def _save_sweep_plot(result, path: str, optimum=None) -> None:
