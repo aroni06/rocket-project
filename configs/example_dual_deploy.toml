@@ -3,9 +3,43 @@
 
 [rocket]
 name = "Example L1 rocket, dual deploy"
-dry_mass_kg = 1.15      # altimeter bay adds mass
-diameter_m = 0.066
-cd = 0.45
+cd = 0.45               # constant drag coefficient, or cd_file = "....csv"
+
+# Geometry, used for stability. Positions are metres aft of the nose tip.
+# Dry mass and CG are summed from the parts below.
+
+[nose]
+shape = "ogive"
+length_m = 0.25
+mass_kg = 0.12
+
+[body]
+length_m = 1.00
+diameter_m = 0.066      # 2.6 in body tube
+mass_kg = 0.50
+
+[fins]
+count = 3
+root_chord_m = 0.15
+tip_chord_m = 0.06
+span_m = 0.065
+sweep_m = 0.07
+mass_kg = 0.12          # all three fins
+
+[[mass]]
+name = "recovery gear"
+mass_kg = 0.18
+position_m = 0.40
+
+[[mass]]
+name = "motor mount and retainer"
+mass_kg = 0.18
+position_m = 1.12
+
+[[mass]]
+name = "altimeter bay"
+mass_kg = 0.05
+position_m = 0.30
 
 [motor]
 file = "../data/motors/Synthetic_H250.eng"
