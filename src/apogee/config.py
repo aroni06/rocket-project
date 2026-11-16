@@ -6,10 +6,11 @@ Example::
     name = "Example L1"
     dry_mass_kg = 1.10
     diameter_m = 0.066
-    cd = 0.45
+    cd = 0.45                      # or cd_file = "cd_vs_mach.csv" (columns: mach, cd)
 
     [motor]
     file = "../data/motors/Synthetic_H200.eng"   # relative to this config file
+    position_m = 1.10              # optional: nose tip to motor front; default is aft-flush
 
     [environment]
     site_elevation_m = 0
@@ -18,6 +19,32 @@ Example::
     [rail]
     length_m = 1.83
     angle_deg = 90
+
+    # Optional geometry, needed for stability (center of pressure, static margin).
+    # Positions are metres aft of the nose tip. With these sections, dry mass and CG
+    # are summed from the parts unless [rocket] gives measured dry_mass_kg / dry_cg_m.
+    [nose]
+    shape = "ogive"                # conical, ogive, parabolic or elliptical
+    length_m = 0.25
+    mass_kg = 0.12
+
+    [body]
+    length_m = 1.0
+    diameter_m = 0.066
+    mass_kg = 0.50
+
+    [fins]
+    count = 3
+    root_chord_m = 0.15
+    tip_chord_m = 0.06
+    span_m = 0.065
+    sweep_m = 0.07
+    mass_kg = 0.12                 # or thickness_m and density_kgm3
+
+    [[mass]]                       # recovery gear, avionics, ballast...
+    name = "recovery"
+    mass_kg = 0.18
+    position_m = 0.40
 
     [[parachute]]                  # repeat the block for each chute
     name = "main"
@@ -37,7 +64,9 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+from .aero import CdTable
 from .atmosphere import StandardAtmosphere
+from .components import Airframe, BodyTube, FinSet, NoseCone, PointMass
 from .environment import Environment
 from .flight import LaunchRail
 from .motor import Motor
@@ -59,7 +88,8 @@ def load_config(path: str | Path) -> SimulationConfig:
     try:
         return SimulationConfig(
             rocket=_rocket(
-                data["rocket"],
+                data,
+                path.parent,
                 _motor(data["motor"], path.parent),
                 [_parachute(p) for p in data.get("parachute", [])],
             ),
@@ -82,14 +112,49 @@ def _motor(cfg: dict, base: Path) -> Motor:
     )
 
 
-def _rocket(cfg: dict, motor: Motor, parachutes: list[Parachute]) -> Rocket:
-    return Rocket(
-        name=cfg.get("name", "rocket"),
-        dry_mass=cfg["dry_mass_kg"],
-        diameter=cfg["diameter_m"],
-        motor=motor,
-        cd=cfg.get("cd", 0.5),
-        parachutes=parachutes,
+def _rocket(data: dict, base: Path, motor: Motor, parachutes: list[Parachute]) -> Rocket:
+    cfg = data["rocket"]
+    name = cfg.get("name", "rocket")
+    cd = CdTable.from_csv(base / cfg["cd_file"]) if "cd_file" in cfg else cfg.get("cd", 0.5)
+    geometry = [key for key in ("nose", "body", "fins") if key in data]
+    if not geometry:
+        return Rocket(name, cfg["dry_mass_kg"], cfg["diameter_m"], motor, cd, parachutes)
+    if len(geometry) < 3:
+        raise ValueError("stability needs all of [nose], [body] and [fins]")
+    airframe = _airframe(data, cfg)
+    return Rocket.from_airframe(
+        name, airframe, motor, cd, parachutes, data["motor"].get("position_m")
+    )
+
+
+def _airframe(data: dict, rocket: dict) -> Airframe:
+    nose, body, fins = data["nose"], data["body"], data["fins"]
+    return Airframe(
+        nose=NoseCone(
+            length=nose["length_m"],
+            shape=nose.get("shape", "ogive"),
+            mass=nose.get("mass_kg", 0.0),
+            cg=nose.get("cg_m"),
+        ),
+        body=BodyTube(
+            length=body["length_m"],
+            diameter=body.get("diameter_m", rocket.get("diameter_m")),
+            mass=body.get("mass_kg", 0.0),
+        ),
+        fins=FinSet(
+            count=fins["count"],
+            root_chord=fins["root_chord_m"],
+            tip_chord=fins["tip_chord_m"],
+            span=fins["span_m"],
+            sweep=fins.get("sweep_m", 0.0),
+            position=fins.get("position_m"),
+            mass=fins.get("mass_kg"),
+            thickness=fins.get("thickness_m"),
+            density=fins.get("density_kgm3"),
+        ),
+        masses=[PointMass(m["name"], m["mass_kg"], m["position_m"]) for m in data.get("mass", [])],
+        mass_override=rocket.get("dry_mass_kg"),
+        cg_override=rocket.get("dry_cg_m"),
     )
 
 

@@ -92,6 +92,10 @@ class FlightResult:
     az: np.ndarray  # vertical acceleration [m/s^2]
     phase: np.ndarray
     events: dict[str, FlightEvent] = field(default_factory=dict)
+    # Stability, when the rocket has airframe geometry. Positions are aft of the nose tip.
+    cp: float | None = None  # center of pressure [m]
+    cg: np.ndarray | None = None  # center of gravity over time [m]
+    static_margin: np.ndarray | None = None  # over time [calibers]
 
     @property
     def speed(self) -> np.ndarray:
@@ -124,6 +128,20 @@ class FlightResult:
         deploys = self.deployments
         before = self.time < deploys[0].time if deploys else np.ones_like(self.time, dtype=bool)
         return float(self.acceleration[before].max())
+
+    def static_margin_at(self, event: str) -> float | None:
+        """Static margin in calibers at a named event, or ``None`` without geometry."""
+        if self.static_margin is None or event not in self.events:
+            return None
+        return float(np.interp(self.events[event].time, self.time, self.static_margin))
+
+    @property
+    def min_static_margin(self) -> float | None:
+        """Lowest static margin during powered and coasting flight [calibers]."""
+        if self.static_margin is None:
+            return None
+        ascent = self.time <= self.events["apogee"].time
+        return float(self.static_margin[ascent].min())
 
     def opening_load(self, chute: str) -> float:
         """Acceleration the instant ``chute`` opens [m/s^2].
@@ -179,8 +197,16 @@ class FlightResult:
             out["burnout_time_s"] = ev.time
             out["burnout_altitude_m"] = ev.altitude
             out["burnout_speed_mps"] = ev.speed
+        if self.static_margin is not None:
+            out["center_of_pressure_m"] = self.cp
+            out["liftoff_cg_m"] = float(self.cg[0])
+            out["liftoff_static_margin_cal"] = float(self.static_margin[0])
+            for event in ("rail_exit", "burnout"):
+                if (margin := self.static_margin_at(event)) is not None:
+                    out[f"{event}_static_margin_cal"] = margin
         deploys = self.deployments
-        for ev, nxt in zip(deploys, [*deploys[1:], self.events["landing"]], strict=True):
+        following = [*deploys, self.events["landing"]][1:]
+        for ev, nxt in zip(deploys, following, strict=True):
             chute = ev.name.removesuffix("_deploy")
             out[f"{chute}_deploy_time_s"] = ev.time
             out[f"{chute}_deploy_altitude_m"] = ev.altitude
@@ -211,6 +237,9 @@ class FlightResult:
             "ax_mps2": self.ax,
             "az_mps2": self.az,
         }
+        if self.static_margin is not None:
+            cols["cg_m"] = self.cg
+            cols["static_margin_cal"] = self.static_margin
         data = np.column_stack(list(cols.values()))
         np.savetxt(path, data, delimiter=",", header=",".join(cols), comments="", fmt="%.6g")
 
@@ -224,9 +253,11 @@ class FlightResult:
         return "\n".join(lines)
 
 
-_UNITS = {"m": "m", "s": "s", "mps": "m/s", "g": "g", "Pa": "Pa"}
+_UNITS = {"m": "m", "s": "s", "mps": "m/s", "g": "g", "Pa": "Pa", "cal": "cal"}
 _LABELS = {
     "max_mach": ("Max Mach", ""),
+    "center_of_pressure_m": ("Center of pressure (from nose)", "m"),
+    "liftoff_cg_m": ("Liftoff CG (from nose)", "m"),
     "landing_speed_mps": ("Landing speed (with drift)", "m/s"),
 }
 
@@ -513,6 +544,11 @@ def _build_result(
         ]
     )
     ax, az, thrust, drag, mass, mach, q = derived.T
+    stability: dict[str, object] = {}
+    if rocket.airframe is not None:
+        cg = np.array([rocket.cg_at(ti) for ti in time])
+        cp = rocket.center_of_pressure.position
+        stability = {"cp": cp, "cg": cg, "static_margin": (cp - cg) / rocket.diameter}
     return FlightResult(
         rocket_name=rocket.name,
         time=time,
@@ -529,4 +565,5 @@ def _build_result(
         az=az,
         phase=phase,
         events=events,
+        **stability,
     )

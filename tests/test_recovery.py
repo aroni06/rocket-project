@@ -142,3 +142,12 @@ def test_invalid_parachutes_raise(kwargs):
 def test_duplicate_parachute_names_raise():
     with pytest.raises(ValueError, match="unique"):
         Rocket("r", 1.0, 0.05, None, parachutes=[Parachute("a", 0.5), Parachute("a", 0.6)])
+
+
+def test_summary_works_without_parachutes():
+    r = _ballistic([])
+    assert r.deployments == []
+    summary = r.summary()
+    assert not any("deploy" in key for key in summary)
+    assert summary["landing_descent_rate_mps"] == pytest.approx(100.0, rel=1e-7)
+    assert "Landing descent rate" in str(r)
