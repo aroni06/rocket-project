@@ -180,7 +180,8 @@ class FlightResult:
             out["burnout_altitude_m"] = ev.altitude
             out["burnout_speed_mps"] = ev.speed
         deploys = self.deployments
-        for ev, nxt in zip(deploys, [*deploys[1:], self.events["landing"]], strict=True):
+        following = [*deploys, self.events["landing"]][1:]
+        for ev, nxt in zip(deploys, following, strict=True):
             chute = ev.name.removesuffix("_deploy")
             out[f"{chute}_deploy_time_s"] = ev.time
             out[f"{chute}_deploy_altitude_m"] = ev.altitude
