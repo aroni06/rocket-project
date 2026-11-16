@@ -5,6 +5,7 @@ from .config import load_config
 from .environment import Environment
 from .flight import FlightEvent, FlightResult, LaunchRail, simulate
 from .motor import Motor, parse_eng
+from .recovery import Parachute
 from .rocket import Rocket
 
 __all__ = [
@@ -14,6 +15,7 @@ __all__ = [
     "FlightResult",
     "LaunchRail",
     "Motor",
+    "Parachute",
     "Rocket",
     "StandardAtmosphere",
     "load_config",
