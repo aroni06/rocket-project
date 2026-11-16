@@ -10,18 +10,20 @@ acceleration and dynamic pressure, rail exit speed, static margin, parachute dep
 conditions, landing speed and wind drift. It can then sweep any of those inputs or search for the
 best design that meets a set of limits: which motor, how much fin, what size parachutes.
 
-> **Status: work in progress.** The flight model, parachute recovery, stability and the design
-> optimizer are done and checked against closed-form solutions and hand calculations.
-> Validation against OpenRocket is next; see the [roadmap](#roadmap).
+> **Status: work in progress.** The flight model, parachute recovery, stability, the design
+> optimizer and the flight animation are done, and the physics is checked against closed-form
+> solutions and hand calculations. Validation against OpenRocket is next; see the
+> [roadmap](#roadmap).
+
+![Animated flight of the example rocket](docs/images/example_flight.gif)
 
 ![Side view of the example rocket with CG and CP](docs/images/example_rocket.png)
 
 ![Simulated flight of the example rocket](docs/images/example_flight.png)
 
-![Flight path of the example rocket](docs/images/example_trajectory.png)
-
 *Example L1 rocket on a synthetic 38 mm H motor, flown dual deploy in a 4 m/s wind: a 0.3 m
-drogue opens 1 s after apogee and a 0.9 m main opens at 150 m.*
+drogue opens 1 s after apogee and a 0.9 m main opens at 150 m. The animation slows the ascent
+and speeds up the descent so both are watchable.*
 
 ## Quickstart
 
@@ -31,7 +33,7 @@ cd rocket-project
 pip install -e ".[dev]"
 
 apogee simulate configs/example_dual_deploy.toml \
-    --plot flight.png --trajectory path.png --drawing rocket.png
+    --plot flight.png --trajectory path.png --drawing rocket.png --animation flight.gif
 pytest
 ```
 
@@ -278,6 +280,7 @@ src/apogee/
   study.py         design studies: sweeps, constraints, optimizer
   config.py        TOML loader
   plots.py         flight, rocket and design-space plots
+  animation.py     animated flight path with a live readout (GIF)
   cli.py           `apogee simulate`, `apogee sweep`, `apogee optimize`
 configs/           example rockets
 studies/           example design studies
@@ -293,8 +296,9 @@ tests/             unit and analytic verification tests
 - [x] 4. Aerodynamics and stability: C_D(Mach) import, Barrowman CP, CG, static margin
 - [ ] 5. Validation against OpenRocket on 2 to 3 rockets
 - [x] 6. Parameter sweeps and constrained design optimizer
-- [ ] 7. Flight animation, technical report and v1.0
-- [ ] 8. After v1.0: liquid and hybrid engines with throttling
+- [x] 7. Flight animation
+- [ ] 8. Technical report and v1.0
+- [ ] 9. After v1.0: liquid and hybrid engines with throttling
 
 ## License
 
