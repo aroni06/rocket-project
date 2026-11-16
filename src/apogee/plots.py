@@ -11,12 +11,20 @@ from matplotlib.figure import Figure
 from .atmosphere import G0
 from .flight import FlightResult
 from .rocket import Rocket
+from .study import DesignPoint, Optimum, SweepResult, Variable
 
 LINE = "#2a78d6"
 ACCENT = "#eb6834"
 INK = "#0b0b0b"
 INK_MUTED = "#52514e"
 GRID = "#e4e3df"
+SURFACE = "#fcfcfb"
+HATCH = "#a9a8a2"
+# Fixed order for series that are told apart by color (motors in a sweep).
+SERIES = ("#2a78d6", "#eb6834", "#1baf7a")
+# One hue, light to dark, for a quantity shown as color over a 2D design space.
+RAMP = ("#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#0d366b")
+UNITS = {"m": "m", "kg": "kg", "mps": "m/s", "deg": "deg", "s": "s", "g": "g", "cal": "cal"}
 
 
 def _event_labels(result: FlightResult) -> dict[str, str]:
@@ -225,4 +233,267 @@ def plot_rocket(rocket: Rocket, path: str | Path | None = None) -> Figure:
     )
     if path is not None:
         fig.savefig(path, dpi=150)
+    return fig
+
+
+# Design studies
+
+
+def plot_sweep(
+    sweep: SweepResult, path: str | Path | None = None, optimum: Optimum | None = None
+) -> Figure:
+    """Plot a sweep's objective over its design space, showing which designs are allowed.
+
+    The form follows the study's variables: a line for one range, bars for one list of
+    choices, a line per choice for a list and a range, and a filled contour map for two
+    ranges. Designs that break a constraint are drawn faded (lines, bars) or veiled (map).
+    The best design on the grid is marked, or the optimizer's result if ``optimum`` is given.
+    """
+    variables = list(sweep.study.variables)
+    numeric = [v for v in variables if v.is_numeric]
+    named = [v for v in variables if not v.is_numeric]
+    if len(variables) == 1 and named:
+        fig = _sweep_bars(sweep)
+    elif len(variables) == 1:
+        fig = _sweep_lines(sweep, numeric[0], None, optimum)
+    elif len(variables) == 2 and len(named) == 1 and len(named[0].grid) <= len(SERIES):
+        fig = _sweep_lines(sweep, numeric[0], named[0], optimum)
+    elif len(variables) == 2 and not named:
+        fig = _sweep_map(sweep, optimum)
+    else:
+        raise ValueError(
+            "a sweep plot needs one or two variables, at most one of them a list of names "
+            f"with up to {len(SERIES)} entries; use the CSV for larger studies"
+        )
+    if path is not None:
+        fig.savefig(path, dpi=150)
+    return fig
+
+
+def _pretty(name: str) -> str:
+    """'parachute.main.diameter_m' -> 'Parachute main diameter [m]'."""
+    words = name.replace(".", "_").split("_")
+    unit = UNITS.get(words[-1]) if len(words) > 1 else None
+    if unit:
+        words = words[:-1]
+    text = " ".join(words).capitalize()
+    return f"{text} [{unit}]" if unit else text
+
+
+def _with_unit(metric: str, value: float) -> str:
+    unit = UNITS.get(metric.rsplit("_", 1)[-1])
+    return f"{value:.0f} {unit}" if unit else f"{value:.3g}"
+
+
+def _worst_margin(sweep: SweepResult) -> np.ndarray:
+    """Over the grid, the scaled distance inside the tightest limit; negative breaks it."""
+    worst = np.full(sweep.shape, np.inf)
+    for c in sweep.study.constraints:
+        for margin in c.margins(sweep.metric(c.metric)):
+            worst = np.minimum(worst, np.nan_to_num(margin, nan=-1.0))
+    return worst
+
+
+def _choice_label(value: object) -> str:
+    text = str(value)
+    return Path(text).stem if "/" in text or "\\" in text else text
+
+
+def _style(ax: plt.Axes) -> None:
+    ax.grid(True, color=GRID, linewidth=0.8)
+    ax.set_axisbelow(True)
+    for side in ("top", "right"):
+        ax.spines[side].set_visible(False)
+    for side in ("left", "bottom"):
+        ax.spines[side].set_color(INK_MUTED)
+    ax.tick_params(colors=INK_MUTED)
+
+
+def _title(ax: plt.Axes, sweep: SweepResult) -> None:
+    study = sweep.study
+    ax.set_title(study.name, loc="left", color=INK, fontsize=12, fontweight="bold", pad=24)
+    limits = "; ".join(f"{_pretty(c.metric)} {c.describe()}" for c in study.constraints)
+    subtitle = f"Limits: {limits}" if limits else "No constraints"
+    ax.text(0, 1.02, subtitle, transform=ax.transAxes, color=INK_MUTED, fontsize=8.5, va="bottom")
+
+
+def _marked_point(sweep: SweepResult, optimum: Optimum | None) -> tuple[DesignPoint | None, str]:
+    if optimum is not None and optimum.feasible:
+        return optimum.best, "Optimum"
+    return sweep.best, "Best on the grid"
+
+
+def _mark(ax: plt.Axes, x: float, y: float, text: str, color: str = ACCENT) -> None:
+    ax.plot(
+        x, y, "o", color=color, markersize=10, markeredgecolor=SURFACE, markeredgewidth=2, zorder=5
+    )
+    ax.annotate(
+        text,
+        (x, y),
+        textcoords="offset points",
+        xytext=(10, 10),
+        color=INK,
+        fontsize=9,
+        bbox={"boxstyle": "round,pad=0.25", "facecolor": SURFACE, "edgecolor": "none"},
+    )
+
+
+def _sweep_lines(
+    sweep: SweepResult, xvar: Variable, series: Variable | None, optimum: Optimum | None
+) -> Figure:
+    """Objective against one numeric variable, with one line per named choice."""
+    study = sweep.study
+    metric = study.objective.metric
+    variables = list(study.variables)
+    x_axis = variables.index(xvar)
+    values = np.moveaxis(sweep.metric(metric), x_axis, -1).reshape(-1, len(xvar.grid))
+    margins = np.moveaxis(_worst_margin(sweep), x_axis, -1).reshape(-1, len(xvar.grid))
+    x = np.array(xvar.grid, dtype=float)
+    # Between grid points, interpolate so the bold part of a line ends where a limit is met.
+    fine = np.linspace(x[0], x[-1], 400)
+    names = [_choice_label(v) for v in series.grid] if series else [None]
+
+    fig, ax = plt.subplots(figsize=(8, 5), layout="constrained")
+    for name, color, y, margin in zip(names, SERIES, values, margins, strict=False):
+        ax.plot(x, y, color=color, linewidth=1.2, alpha=0.45)
+        ok = np.interp(fine, x, margin) >= 0
+        y_fine = np.where(ok, np.interp(fine, x, y), np.nan)
+        ax.plot(fine, y_fine, color=color, linewidth=2.6, solid_capstyle="round")
+        if name is not None:
+            ax.plot([], [], color=color, linewidth=2.6, label=name)
+            ax.annotate(
+                name,
+                (x[-1], y[-1]),
+                textcoords="offset points",
+                xytext=(6, 0),
+                va="center",
+                color=INK,
+                fontsize=9,
+            )
+    ax.plot([], [], color=INK_MUTED, linewidth=2.6, label="Meets every limit")
+    ax.plot([], [], color=INK_MUTED, linewidth=1.2, alpha=0.45, label="Breaks a limit")
+    for c in study.constraints:
+        if c.metric != metric:
+            continue
+        for bound in (c.lower, c.upper):
+            if bound is not None:
+                ax.axhline(bound, color=INK_MUTED, linewidth=1.0)
+                ax.annotate(
+                    f"limit {bound:g}",
+                    (x[0], bound),
+                    textcoords="offset points",
+                    xytext=(2, 4),
+                    color=INK_MUTED,
+                    fontsize=8.5,
+                )
+    point, label = _marked_point(sweep, optimum)
+    if point is not None:
+        value = point.metrics[metric]
+        text = f"{label}: {_with_unit(metric, value)}"
+        _mark(ax, point.values[xvar.path], value, text, color=INK)
+    ax.set_xlabel(_pretty(xvar.path), color=INK)
+    ax.set_ylabel(_pretty(metric), color=INK)
+    ax.margins(x=0.02)
+    if series:
+        ax.set_xlim(right=x[-1] + 0.22 * (x[-1] - x[0]))
+    ax.legend(frameon=False, fontsize=8.5, labelcolor=INK_MUTED, loc="best")
+    _style(ax)
+    _title(ax, sweep)
+    return fig
+
+
+def _sweep_bars(sweep: SweepResult) -> Figure:
+    """Objective for each entry of a single list of named choices."""
+    study = sweep.study
+    metric = study.objective.metric
+    names = [_choice_label(v) for v in study.variables[0].grid]
+    values = sweep.metric(metric)
+    allowed = sweep.feasible
+    fig, ax = plt.subplots(figsize=(8, 0.6 * len(names) + 1.8), layout="constrained")
+    rows = np.arange(len(names))
+    ax.barh(rows[allowed], values[allowed], height=0.5, color=LINE, label="Meets every limit")
+    ax.barh(
+        rows[~allowed], values[~allowed], height=0.5, color=LINE, alpha=0.3, label="Breaks a limit"
+    )
+    for row, value in zip(rows, values, strict=True):
+        if np.isfinite(value):
+            ax.annotate(
+                f"{value:.0f}",
+                (value, row),
+                textcoords="offset points",
+                xytext=(5, 0),
+                va="center",
+                color=INK,
+                fontsize=9,
+            )
+    ax.set_yticks(rows, names)
+    ax.invert_yaxis()
+    ax.set_xlabel(_pretty(metric), color=INK)
+    ax.margins(x=0.1)
+    ax.legend(frameon=False, fontsize=8.5, labelcolor=INK_MUTED, loc="lower right")
+    _style(ax)
+    ax.grid(False, axis="y")
+    _title(ax, sweep)
+    return fig
+
+
+def _sweep_map(sweep: SweepResult, optimum: Optimum | None) -> Figure:
+    """Objective as a filled contour map over two numeric variables."""
+    from matplotlib.colors import LinearSegmentedColormap
+
+    study = sweep.study
+    metric = study.objective.metric
+    xvar, yvar = study.variables
+    x = np.array(xvar.grid, dtype=float)
+    y = np.array(yvar.grid, dtype=float)
+    z = sweep.metric(metric).T  # rows follow y, columns follow x
+
+    fig, ax = plt.subplots(figsize=(8, 5.6), layout="constrained")
+    cmap = LinearSegmentedColormap.from_list("ramp", RAMP)
+    filled = ax.contourf(x, y, z, levels=10, cmap=cmap)
+    bar = fig.colorbar(filled, ax=ax, pad=0.02)
+    bar.set_label(_pretty(metric), color=INK)
+    bar.ax.tick_params(colors=INK_MUTED)
+    bar.outline.set_visible(False)
+
+    # Veil everything that breaks a limit, then draw and name each limit's boundary.
+    worst = _worst_margin(sweep)
+    if study.constraints and worst.min() < 0:
+        ax.contourf(x, y, worst.T, levels=[-np.inf, 0.0], colors=[SURFACE], alpha=0.8)
+        hatch = ax.contourf(x, y, worst.T, levels=[-np.inf, 0.0], colors="none", hatches=["///"])
+        hatch.set_edgecolor(HATCH)
+        hatch.set_linewidth(0.0)
+    for c in study.constraints:
+        field = sweep.metric(c.metric).T
+        for bound in (c.lower, c.upper):
+            if bound is None or not np.nanmin(field) < bound < np.nanmax(field):
+                continue
+            edge = ax.contour(x, y, field, levels=[bound], colors=[INK], linewidths=1.6)
+            name = _pretty(c.metric).split(" [")[0]
+            ax.clabel(edge, fmt={bound: f"{name} = {bound:g}"}, fontsize=8.5, inline_spacing=6)
+
+    point, label = _marked_point(sweep, optimum)
+    if point is not None:
+        value = point.metrics[metric]
+        text = f"{label}: {_with_unit(metric, value)}"
+        _mark(ax, point.values[xvar.path], point.values[yvar.path], text)
+    ax.set_xlabel(_pretty(xvar.path), color=INK)
+    ax.set_ylabel(_pretty(yvar.path), color=INK)
+    for side in ("top", "right"):
+        ax.spines[side].set_visible(False)
+    for side in ("left", "bottom"):
+        ax.spines[side].set_color(INK_MUTED)
+    ax.tick_params(colors=INK_MUTED)
+    _title(ax, sweep)
+    if study.constraints and worst.min() < 0:
+        ax.text(
+            1.0,
+            1.02,
+            "Hatched: breaks a limit",
+            transform=ax.transAxes,
+            ha="right",
+            va="bottom",
+            color=INK_MUTED,
+            fontsize=8.5,
+        )
     return fig

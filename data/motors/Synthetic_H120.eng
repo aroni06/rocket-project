@@ -1,0 +1,16 @@
+; SYNTHETIC thrust curve for examples and tests only. This is NOT a real motor.
+; It is shaped like a long-burning 38 mm H-class reload, so design studies have a
+; second motor to choose from. For real analysis, download the .eng file for your
+; motor from https://www.thrustcurve.org and point your config at it.
+;
+; name  dia(mm) len(mm) delays prop(kg) total(kg) manufacturer
+Synthetic_H120 38 186 6-10-14 0.125 0.255 Example
+0.000 0.0
+0.040 150.0
+0.200 140.0
+0.800 130.0
+1.400 118.0
+1.800 100.0
+1.950 40.0
+2.050 0.0
+;

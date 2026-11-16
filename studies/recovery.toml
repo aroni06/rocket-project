@@ -1,0 +1,32 @@
+# Size the drogue and main parachutes of the dual-deploy example.
+#
+# Smaller parachutes mean less drift, so the walk to the rocket is shorter. Two things
+# stop them shrinking: the rocket must land gently, and the main must not open at a
+# speed that tears it off. The best design sits where both limits meet.
+
+name = "Recovery sizing"
+base = "../configs/example_dual_deploy.toml"
+
+[objective]
+metric = "descent_drift_m"     # distance drifted between apogee and landing
+goal = "minimize"
+
+[[variable]]
+path = "parachute.drogue.diameter_m"
+min = 0.20
+max = 0.60
+steps = 9
+
+[[variable]]
+path = "parachute.main.diameter_m"
+min = 0.60
+max = 1.40
+steps = 9
+
+[[constraint]]
+metric = "landing_descent_rate_mps"
+max = 5.0
+
+[[constraint]]
+metric = "main_opening_load_g"  # upper bound: the model inflates the canopy instantly
+max = 12.0
