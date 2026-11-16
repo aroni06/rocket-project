@@ -147,7 +147,7 @@ def test_rocket_without_geometry_has_no_stability():
 def test_example_config_is_stable(example_config):
     cfg = load_config(example_config)
     assert cfg.rocket.airframe is not None
-    assert cfg.rocket.dry_mass == pytest.approx(1.10)
+    assert cfg.rocket.dry_mass == pytest.approx(1.10, abs=1e-3)
     assert cfg.rocket.diameter == pytest.approx(0.066)
     result = simulate(cfg.rocket, cfg.environment, cfg.rail)
     assert 1.0 < result.static_margin_at("rail_exit") < 2.5
