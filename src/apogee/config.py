@@ -81,23 +81,37 @@ class SimulationConfig:
     rail: LaunchRail
 
 
+def read_config(path: str | Path) -> dict:
+    """Read a config file into a plain dict, without building anything from it."""
+    with Path(path).open("rb") as fh:
+        return tomllib.load(fh)
+
+
 def load_config(path: str | Path) -> SimulationConfig:
     path = Path(path)
-    with path.open("rb") as fh:
-        data = tomllib.load(fh)
+    return build_config(read_config(path), path.parent, source=str(path))
+
+
+def build_config(data: dict, base: str | Path = ".", source: str = "config") -> SimulationConfig:
+    """Build a rocket, environment and rail from config data.
+
+    ``base`` is the directory that relative file paths in the data are resolved against.
+    Design studies call this with a modified copy of a config's data for every design.
+    """
+    base = Path(base)
     try:
         return SimulationConfig(
             rocket=_rocket(
                 data,
-                path.parent,
-                _motor(data["motor"], path.parent),
+                base,
+                _motor(data["motor"], base),
                 [_parachute(p) for p in data.get("parachute", [])],
             ),
             environment=_environment(data.get("environment", {})),
             rail=_rail(data.get("rail", {})),
         )
     except KeyError as exc:
-        raise ValueError(f"{path}: missing required key {exc}") from exc
+        raise ValueError(f"{source}: missing required key {exc}") from exc
 
 
 def _motor(cfg: dict, base: Path) -> Motor:
