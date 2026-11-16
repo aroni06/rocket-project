@@ -1,4 +1,5 @@
-# Example single-stage high-power rocket on a 38 mm H motor.
+# Example single-stage high-power rocket on a 38 mm H motor, Level 1 style:
+# one parachute, deployed by the motor's ejection charge.
 # The motor curve is synthetic (see the .eng file header); swap in a real one
 # from thrustcurve.org for real predictions.
 
@@ -13,9 +14,16 @@ file = "../data/motors/Synthetic_H250.eng"
 
 [environment]
 site_elevation_m = 0.0
-wind_speed_mps = 0.0
+wind_speed_mps = 4.0    # blowing downrange
 temperature_offset_K = 0.0
 
 [rail]
 length_m = 1.83         # 6 ft rail
 angle_deg = 90.0
+
+[[parachute]]
+name = "main"
+diameter_m = 0.9        # 36 in round chute
+cd = 1.5
+deploy = "burnout"      # motor ejection charge
+delay_s = 10.0          # motor delay, picked so the chute opens near apogee

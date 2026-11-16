@@ -13,10 +13,12 @@ velocity afterwards (zero angle of attack, the usual 3-DOF assumption). Drag is
 
     D = -1/2 rho Cd(M) A |v_air| v_air,   v_air = v - v_wind.
 
-The flight is integrated phase by phase so that discontinuities (rail exit, thrust curve
-corners, burnout) always land on a step boundary:
+Each deployed parachute adds ``1/2 rho Cd_chute A_chute |v_air| v_air`` to the drag.
 
-    rail -> powered -> coast -> apogee -> descent -> landing
+The flight is integrated phase by phase so that discontinuities (rail exit, thrust curve
+corners, burnout, parachute deployments) always land on a step boundary:
+
+    rail -> powered -> coast -> apogee -> descent (parachutes deploy) -> landing
 """
 
 from __future__ import annotations
@@ -31,6 +33,7 @@ from scipy.integrate import solve_ivp
 
 from .atmosphere import G0
 from .environment import Environment
+from .recovery import Parachute
 from .rocket import Rocket
 
 EventFn = Callable[[float, np.ndarray], float]
@@ -117,7 +120,19 @@ class FlightResult:
 
     @property
     def max_acceleration(self) -> float:
-        return float(self.acceleration.max())
+        """Peak acceleration before any parachute opens (boost and coast) [m/s^2]."""
+        deploys = self.deployments
+        before = self.time < deploys[0].time if deploys else np.ones_like(self.time, dtype=bool)
+        return float(self.acceleration[before].max())
+
+    def opening_load(self, chute: str) -> float:
+        """Acceleration the instant ``chute`` opens [m/s^2].
+
+        Inflation is modelled as instant, so this is an upper bound on the opening shock.
+        """
+        t_open = self.events[f"{chute}_deploy"].time
+        k = int(np.searchsorted(self.time, t_open))
+        return float(self.acceleration[k])
 
     @property
     def max_dynamic_pressure(self) -> float:
@@ -130,11 +145,23 @@ class FlightResult:
 
     @property
     def landing_speed(self) -> float:
+        """Ground-relative speed at touchdown, including horizontal drift [m/s]."""
         return self.events["landing"].speed
+
+    @property
+    def landing_descent_rate(self) -> float:
+        """Vertical speed at touchdown [m/s], the number parachutes are sized for."""
+        return -self.events["landing"].vertical_velocity
 
     @property
     def flight_time(self) -> float:
         return self.events["landing"].time
+
+    @property
+    def deployments(self) -> list[FlightEvent]:
+        """Parachute deployment events in time order."""
+        evs = [ev for name, ev in self.events.items() if name.endswith("_deploy")]
+        return sorted(evs, key=lambda ev: ev.time)
 
     def summary(self) -> dict[str, float]:
         """Key performance numbers, keyed by name with units."""
@@ -143,7 +170,7 @@ class FlightResult:
             "time_to_apogee_s": self.time_to_apogee,
             "max_speed_mps": self.max_speed,
             "max_mach": self.max_mach,
-            "max_acceleration_g": self.max_acceleration / G0,
+            "max_ascent_acceleration_g": self.max_acceleration / G0,
             "max_dynamic_pressure_Pa": self.max_dynamic_pressure,
         }
         if (ev := self.events.get("rail_exit")) is not None:
@@ -152,7 +179,19 @@ class FlightResult:
             out["burnout_time_s"] = ev.time
             out["burnout_altitude_m"] = ev.altitude
             out["burnout_speed_mps"] = ev.speed
+        deploys = self.deployments
+        for ev, nxt in zip(deploys, [*deploys[1:], self.events["landing"]], strict=True):
+            chute = ev.name.removesuffix("_deploy")
+            out[f"{chute}_deploy_time_s"] = ev.time
+            out[f"{chute}_deploy_altitude_m"] = ev.altitude
+            out[f"{chute}_deploy_speed_mps"] = ev.speed
+            out[f"{chute}_opening_load_g"] = self.opening_load(chute) / G0
+            if nxt.name != "landing":
+                # Sink rate just before the next chute opens: the steady rate under this one.
+                out[f"{chute}_descent_rate_mps"] = -nxt.vertical_velocity
+        out["landing_descent_rate_mps"] = self.landing_descent_rate
         out["landing_speed_mps"] = self.landing_speed
+        out["apogee_downrange_m"] = self.events["apogee"].downrange
         out["landing_downrange_m"] = self.events["landing"].downrange
         out["flight_time_s"] = self.flight_time
         return out
@@ -176,26 +215,31 @@ class FlightResult:
         np.savetxt(path, data, delimiter=",", header=",".join(cols), comments="", fmt="%.6g")
 
     def __str__(self) -> str:
-        labels = {
-            "apogee_m": ("Apogee", "m"),
-            "time_to_apogee_s": ("Time to apogee", "s"),
-            "max_speed_mps": ("Max speed", "m/s"),
-            "max_mach": ("Max Mach", ""),
-            "max_acceleration_g": ("Max acceleration", "g"),
-            "max_dynamic_pressure_Pa": ("Max dynamic pressure", "Pa"),
-            "rail_exit_speed_mps": ("Rail exit speed", "m/s"),
-            "burnout_time_s": ("Burnout time", "s"),
-            "burnout_altitude_m": ("Burnout altitude", "m"),
-            "burnout_speed_mps": ("Burnout speed", "m/s"),
-            "landing_speed_mps": ("Landing speed", "m/s"),
-            "landing_downrange_m": ("Landing downrange", "m"),
-            "flight_time_s": ("Flight time", "s"),
-        }
         lines = [f"Flight summary: {self.rocket_name}"]
         for key, value in self.summary().items():
-            label, unit = labels[key]
-            lines.append(f"  {label:<22} {value:>10.2f} {unit}")
+            label, unit = _label(key)
+            if key.endswith("opening_load_g"):
+                label += " (upper bound)"
+            lines.append(f"  {label:<36} {value:>10.2f} {unit}")
         return "\n".join(lines)
+
+
+_UNITS = {"m": "m", "s": "s", "mps": "m/s", "g": "g", "Pa": "Pa"}
+_LABELS = {
+    "max_mach": ("Max Mach", ""),
+    "landing_speed_mps": ("Landing speed (with drift)", "m/s"),
+}
+
+
+def _label(key: str) -> tuple[str, str]:
+    """Turn a summary key like ``main_deploy_speed_mps`` into ("Main deploy speed", "m/s")."""
+    if key in _LABELS:
+        return _LABELS[key]
+    stem, _, suffix = key.rpartition("_")
+    unit = _UNITS.get(suffix, "")
+    if not unit:
+        stem = key
+    return stem.replace("_", " ").capitalize(), unit
 
 
 class _Dynamics:
@@ -205,8 +249,13 @@ class _Dynamics:
         self.rail_dir = rail.direction
         self.area = rocket.reference_area
 
-    def evaluate(self, t: float, y: np.ndarray, on_rail: bool) -> tuple[float, ...]:
-        """Return (ax, az, thrust, drag, mass, mach, dynamic_pressure)."""
+    def evaluate(
+        self, t: float, y: np.ndarray, on_rail: bool, chute_drag_area: float = 0.0
+    ) -> tuple[float, ...]:
+        """Return (ax, az, thrust, drag, mass, mach, dynamic_pressure).
+
+        ``chute_drag_area`` is the summed Cd * A of the deployed parachutes [m^2].
+        """
         _, z, vx, vz = y
         rocket, env = self.rocket, self.env
         m = rocket.mass_at(t)
@@ -217,7 +266,7 @@ class _Dynamics:
         v_air = math.hypot(vax, vaz)
         mach = v_air / atm.speed_of_sound
         q = 0.5 * atm.density * v_air * v_air
-        drag = q * rocket.drag_coefficient(mach) * self.area
+        drag = q * (rocket.drag_coefficient(mach) * self.area + chute_drag_area)
 
         if on_rail or v_air < 1e-9:
             ux, uz = self.rail_dir
@@ -242,9 +291,11 @@ class _Dynamics:
             ax, az = fx / m, fz / m
         return ax, az, thrust, drag, m, mach, q
 
-    def rhs(self, on_rail: bool) -> Callable[[float, np.ndarray], list[float]]:
+    def rhs(
+        self, on_rail: bool, chute_drag_area: float = 0.0
+    ) -> Callable[[float, np.ndarray], list[float]]:
         def f(t: float, y: np.ndarray) -> list[float]:
-            ax, az, *_ = self.evaluate(t, y, on_rail)
+            ax, az, *_ = self.evaluate(t, y, on_rail, chute_drag_area)
             return [y[2], y[3], ax, az]
 
         return f
@@ -272,14 +323,15 @@ class _Integrator:
         t_final: float,
         events: dict[str, EventFn],
         breakpoints: Sequence[float] = (),
+        chute_drag_area: float = 0.0,
     ) -> tuple[float, np.ndarray, str | None]:
         """Integrate across breakpoints until a terminal event fires or ``t_final``."""
         knots = sorted(b for b in breakpoints if t_start < b < t_final) + [t_final]
         on_rail = phase == "rail"
-        rhs = self.dyn.rhs(on_rail)
+        rhs = self.dyn.rhs(on_rail, chute_drag_area)
 
         def speed_peak(t: float, y: np.ndarray) -> float:
-            ax, az, *_ = self.dyn.evaluate(t, y, on_rail)
+            ax, az, *_ = self.dyn.evaluate(t, y, on_rail, chute_drag_area)
             return ax * y[2] + az * y[3]  # d|v|/dt * |v|
 
         speed_peak.terminal = False  # type: ignore[attr-defined]
@@ -343,7 +395,6 @@ def simulate(
     events: dict[str, FlightEvent] = {}
 
     landing = _event(lambda t, y: y[1], -1.0)
-    apogee = _event(lambda t, y: y[3], -1.0)
 
     # Rail: constrained along the rail until the rocket has travelled its full length.
     if motor and rail.length > 0:
@@ -364,27 +415,80 @@ def simulate(
     if motor:
         events["burnout"] = FlightEvent.from_state("burnout", t, y)
 
-    # Coast to apogee.
-    if y[3] > 0.0:
-        t, y, fired = integ.run("coast", t, y, max_time, {"apogee": apogee})
-        if fired is None:
-            raise RuntimeError(f"max_time = {max_time} s reached before apogee")
-        events["apogee"] = FlightEvent.from_state("apogee", t, y)
-    else:
+    _fly_to_landing(rocket, integ, events, t, y, max_time)
+    return _build_result(rocket, dyn, integ, events)
+
+
+def _fly_to_landing(
+    rocket: Rocket,
+    integ: _Integrator,
+    events: dict[str, FlightEvent],
+    t: float,
+    y: np.ndarray,
+    max_time: float,
+) -> None:
+    """Coast to apogee and descend to landing, deploying parachutes on their triggers."""
+    landing = _event(lambda t, y: y[1], -1.0)
+    apogee = _event(lambda t, y: y[3], -1.0)
+
+    scheduled: dict[str, float] = {}  # parachute name -> deploy time
+    deployed: list[Parachute] = []
+    armed = [p for p in rocket.parachutes if p.trigger == "altitude"]
+    for p in rocket.parachutes:
+        if p.trigger == "burnout":
+            scheduled[p.name] = events["burnout"].time + p.delay if "burnout" in events else p.delay
+
+    def on_apogee(t_apo: float, z_apo: float) -> None:
+        for p in rocket.parachutes:
+            if p.trigger == "apogee" or (p in armed and p.altitude >= z_apo):
+                scheduled[p.name] = t_apo + p.delay
+        armed[:] = [p for p in armed if p.altitude < z_apo]
+
+    if y[3] <= 0.0:
         # Already descending at burnout (e.g. a very low-angle launch): take the highest
         # recorded point as apogee.
         times = np.concatenate(integ.t)
         states = np.concatenate(integ.y, axis=1)
         k = int(np.argmax(states[1]))
         events["apogee"] = FlightEvent.from_state("apogee", times[k], states[:, k])
+        on_apogee(t, events["apogee"].altitude)
 
-    # Descent. Ballistic for now; parachutes arrive with the recovery model.
-    t, y, fired = integ.run("descent", t, y, max_time, {"landing": landing})
-    if fired is None:
-        raise RuntimeError(f"max_time = {max_time} s reached before landing")
-    events["landing"] = FlightEvent.from_state("landing", t, y)
+    while True:
+        ascending = "apogee" not in events
+        stops: dict[str, EventFn] = {"landing": landing}
+        if ascending:
+            stops["apogee"] = apogee
+        else:
+            for p in armed:
+                stops[f"trigger:{p.name}"] = _event(lambda t, y, h=p.altitude: y[1] - h, -1.0)
+        for p in rocket.parachutes:
+            if p not in deployed and scheduled.get(p.name, math.inf) <= t:
+                deployed.append(p)  # due now (e.g. zero delay at apogee)
+                events[f"{p.name}_deploy"] = FlightEvent.from_state(f"{p.name}_deploy", t, y)
+        pending = {n: tp for n, tp in scheduled.items() if n not in {d.name for d in deployed}}
+        t_stop = min([max_time, *pending.values()])
+        drag_area = sum(p.drag_area for p in deployed)
+        phase = "coast" if ascending else "descent"
+        t, y, fired = integ.run(phase, t, y, t_stop, stops, chute_drag_area=drag_area)
 
-    return _build_result(rocket, dyn, integ, events)
+        if fired == "landing":
+            events["landing"] = FlightEvent.from_state("landing", t, y)
+            return
+        if fired == "apogee":
+            events["apogee"] = FlightEvent.from_state("apogee", t, y)
+            on_apogee(t, float(y[1]))
+        elif fired is not None and fired.startswith("trigger:"):
+            p = next(p for p in armed if f"trigger:{p.name}" == fired)
+            armed.remove(p)
+            scheduled[p.name] = t + p.delay
+        elif t >= max_time:
+            what = "apogee" if ascending else "landing"
+            raise RuntimeError(f"max_time = {max_time} s reached before {what}")
+        else:
+            for p in rocket.parachutes:
+                if pending.get(p.name) == t_stop:
+                    deployed.append(p)
+                    events[f"{p.name}_deploy"] = FlightEvent.from_state(f"{p.name}_deploy", t, y)
 
 
 def _build_result(
@@ -393,8 +497,20 @@ def _build_result(
     time = np.concatenate(integ.t)
     states = np.concatenate(integ.y, axis=1)
     phase = np.concatenate(integ.phase)
+    deploy_times = [
+        (events[f"{p.name}_deploy"].time, p.drag_area)
+        for p in rocket.parachutes
+        if f"{p.name}_deploy" in events
+    ]
+
+    def chute_drag_area(ti: float) -> float:
+        return sum(cda for td, cda in deploy_times if ti >= td)
+
     derived = np.array(
-        [dyn.evaluate(ti, states[:, i], phase[i] == "rail") for i, ti in enumerate(time)]
+        [
+            dyn.evaluate(ti, states[:, i], phase[i] == "rail", chute_drag_area(ti))
+            for i, ti in enumerate(time)
+        ]
     )
     ax, az, thrust, drag, mass, mach, q = derived.T
     return FlightResult(

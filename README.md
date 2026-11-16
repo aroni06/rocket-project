@@ -4,18 +4,21 @@
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
-**A 2D rocket flight simulator for model and high-power rockets, written in Python.** It
-predicts apogee, max velocity, max acceleration, max dynamic pressure, rail exit speed and
-landing conditions from a rocket definition and a real motor thrust curve.
+**A 2D rocket flight simulator for model and high-power rockets, written in Python.** From a
+rocket definition, a motor thrust curve and its parachutes, it predicts apogee, max velocity,
+acceleration and dynamic pressure, rail exit speed, parachute deployment conditions, landing
+speed and wind drift.
 
-> **Status: work in progress.** The core flight model (milestones 1 and 2) is done and checked
-> against closed-form solutions. Parachute recovery, stability (Barrowman), OpenRocket validation
+> **Status: work in progress.** The flight model and parachute recovery (milestones 1 to 3) are
+> done and checked against closed-form solutions. Stability (Barrowman), OpenRocket validation
 > and the design optimizer are next; see the [roadmap](#roadmap).
 
 ![Simulated flight of the example rocket](docs/images/example_flight.png)
 
-*Example L1 rocket on a synthetic 38 mm H motor. Descent is ballistic until the recovery model
-lands in milestone 3.*
+![Flight path of the example rocket](docs/images/example_trajectory.png)
+
+*Example L1 rocket on a synthetic 38 mm H motor, flown dual deploy in a 4 m/s wind: a 0.3 m
+drogue opens 1 s after apogee and a 0.9 m main opens at 150 m.*
 
 ## Quickstart
 
@@ -24,23 +27,29 @@ git clone https://github.com/aroni06/rocket-project.git
 cd rocket-project
 pip install -e ".[dev]"
 
-apogee simulate configs/example_l1.toml --plot flight.png --csv flight.csv
+apogee simulate configs/example_dual_deploy.toml --plot flight.png --trajectory path.png
 pytest
 ```
 
 ```
 Motor: Synthetic_H250 (H, 260.8 N s, 1.32 s burn)
-Flight summary: Example L1 rocket
-  Apogee                     947.69 m
-  Time to apogee              13.00 s
-  Max speed                  176.99 m/s
-  Max Mach                     0.52
-  Max acceleration            18.52 g
-  Rail exit speed             24.72 m/s
+Flight summary: Example L1 rocket, dual deploy
+  Apogee                                   896.58 m
+  Max speed                                170.48 m/s
+  Max ascent acceleration                   17.83 g
+  Rail exit speed                           24.24 m/s
+  Drogue descent rate                       13.88 m/s
+  Main deploy altitude                     150.00 m
+  Main opening load (upper bound)            8.88 g
+  Landing descent rate                       4.38 m/s
+  Landing downrange                         88.62 m
   ...
 ```
 
-Rockets are defined in TOML ([example](configs/example_l1.toml)). Motors are RASP `.eng`
+Rockets are defined in TOML: a [single-deploy example](configs/example_l1.toml) using the
+motor's ejection charge, and a [dual-deploy example](configs/example_dual_deploy.toml). Each
+parachute opens on a trigger plus an optional delay: `apogee`, descending through a set
+`altitude`, or `burnout` (a motor ejection delay). Motors are RASP `.eng`
 files, the format published by [thrustcurve.org](https://www.thrustcurve.org). The bundled
 `Synthetic_H250.eng` is a made-up curve so the example runs out of the box; download a real
 `.eng` for real predictions.
@@ -52,7 +61,7 @@ from apogee import load_config, simulate
 
 cfg = load_config("configs/example_l1.toml")
 result = simulate(cfg.rocket, cfg.environment, cfg.rail)
-print(result.apogee, result.max_speed, result.rail_exit_speed)
+print(result.apogee, result.rail_exit_speed, result.landing_descent_rate)
 ```
 
 ## Model
@@ -74,14 +83,23 @@ $$
 | Gravity | Inverse-square, g = g0 (R / (R + h))^2 |
 | Attitude | Along the rail until rail exit, then along the air-relative velocity (zero angle of attack) |
 | Wind | Constant horizontal wind |
+| Parachutes | Drag 1/2 rho v^2 Cd A per canopy against the air-relative velocity; triggered at apogee, at an altitude, or by motor ejection delay; drogues stay attached after the main opens |
 
 The flight is integrated phase by phase with SciPy's `solve_ivp` (DOP853, adaptive step), and
-every discontinuity lands on a step boundary: each thrust-curve corner, rail exit, burnout and
-apogee. Rail exit, apogee, landing and the speed peak are located exactly with event functions
-rather than read off the nearest time step.
+every discontinuity lands on a step boundary: each thrust-curve corner, rail exit, burnout,
+apogee and parachute deployment. Rail exit, apogee, deployment altitudes, landing and the speed
+peak are located exactly with event functions rather than read off the nearest time step.
 
 **Deliberately not modelled:** rotational (6-DOF) dynamics, weathercocking on the rail, wind
 profiles and gusts, Earth rotation, multi-stage vehicles.
+
+**Known limitations:**
+
+- Parachutes inflate instantly, so the reported opening load is an upper bound on the real
+  opening shock.
+- The rocket turns into the relative wind the moment it leaves the rail. A real rocket has
+  rotational inertia and turns more slowly, so the model overpredicts how far upwind it flies in
+  a crosswind (220 m upwind at apogee in the example). OpenRocket comparisons will quantify this.
 
 ## Verification
 
@@ -96,6 +114,10 @@ closed-form answer:
 | Ballistic arc, inverse-square gravity | Specific energy conserved | 1e-8 relative |
 | Solver tolerance 1e-6 vs 1e-11 | Apogee and max speed | 1e-5 relative |
 | Standard atmosphere | T, p, rho at 0, 1, 5, 11 and 20 km vs 1976 tables | 1e-4 relative |
+| Fall under a parachute from apogee | Landing descent rate vs the closed-form quadratic-drag solution | 1e-6 relative |
+| Drogue, then drogue plus main | Steady descent rates vs terminal velocity sqrt(2mg / rho Cd A) | 1e-3 relative |
+| Deployment triggers | Apogee + delay, set altitude, burnout + ejection delay | exact event times |
+| Descent in wind | Horizontal speed under canopy settles at wind speed | 1e-3 relative |
 
 Comparison against OpenRocket on real rocket designs comes with milestone 5.
 
@@ -107,6 +129,7 @@ src/apogee/
   motor.py         .eng parser, thrust(t), mass(t)
   rocket.py        rocket definition
   environment.py   gravity, wind, launch site
+  recovery.py      parachutes, deployment triggers, terminal velocity
   flight.py        equations of motion, phases, events, FlightResult
   config.py        TOML loader
   plots.py         standard flight plots
@@ -120,7 +143,7 @@ tests/             unit and analytic verification tests
 
 - [x] 1. Repo skeleton, packaging, CI
 - [x] 2. Core 2D flight model with analytic verification
-- [ ] 3. Recovery: single and dual deploy, landing speed, wind drift
+- [x] 3. Recovery: single and dual deploy, landing speed, wind drift
 - [ ] 4. Aerodynamics and stability: C_D(Mach) import, Barrowman CP, CG, static margin
 - [ ] 5. Validation against OpenRocket on 2 to 3 rockets
 - [ ] 6. Parameter sweeps and constrained design optimizer

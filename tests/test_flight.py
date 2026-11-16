@@ -59,9 +59,11 @@ def test_underpowered_rocket_never_leaves_rail():
 
 
 def test_cli_writes_outputs(example_config, tmp_path, capsys):
-    csv, png = tmp_path / "flight.csv", tmp_path / "flight.png"
-    assert main(["simulate", str(example_config), "--csv", str(csv), "--plot", str(png)]) == 0
+    csv, png, path = tmp_path / "flight.csv", tmp_path / "flight.png", tmp_path / "path.png"
+    args = ["simulate", str(example_config), "--csv", str(csv), "--plot", str(png)]
+    assert main([*args, "--trajectory", str(path)]) == 0
     out = capsys.readouterr().out
     assert "Apogee" in out
     assert csv.read_text().startswith("time_s,")
     assert png.stat().st_size > 0
+    assert path.stat().st_size > 0

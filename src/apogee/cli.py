@@ -15,6 +15,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     sim.add_argument("config", help="path to a rocket config (.toml)")
     sim.add_argument("--plot", metavar="PNG", help="save altitude/speed/acceleration plot")
     sim.add_argument("--csv", metavar="CSV", help="save the full time history")
+    sim.add_argument("--trajectory", metavar="PNG", help="save the flight path plot")
 
     args = parser.parse_args(argv)
     if args.command == "simulate":
@@ -50,6 +51,14 @@ def _simulate(args: argparse.Namespace) -> int:
 
         plot_flight(result, args.plot)
         print(f"Wrote {args.plot}")
+    if args.trajectory:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        from .plots import plot_trajectory
+
+        plot_trajectory(result, args.trajectory)
+        print(f"Wrote {args.trajectory}")
     return 0
 
 

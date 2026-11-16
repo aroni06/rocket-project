@@ -1,7 +1,7 @@
 """Rocket definition.
 
-Milestone 2 treats the airframe as a single body with a fixed dry mass and a drag
-coefficient that is either constant or a function of Mach number. Component geometry,
+The airframe is a single body with a fixed dry mass and a drag coefficient that is either
+constant or a function of Mach number, plus any number of parachutes. Component geometry,
 center of gravity and center of pressure arrive with the stability model.
 """
 
@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .motor import Motor
+from .recovery import Parachute
 
 
 @dataclass
@@ -21,6 +22,7 @@ class Rocket:
     ``dry_mass`` is everything except the motor [kg]. ``diameter`` is the body tube
     outer diameter used as the drag reference [m]. ``cd`` is either a constant or a
     callable ``cd(mach)``. ``motor`` may be ``None`` for unpowered test cases.
+    ``parachutes`` deploy in flight according to their triggers.
     """
 
     name: str
@@ -28,12 +30,16 @@ class Rocket:
     diameter: float
     motor: Motor | None
     cd: float | Callable[[float], float] = 0.5
+    parachutes: list[Parachute] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if self.dry_mass <= 0:
             raise ValueError("dry_mass must be positive")
         if self.diameter <= 0:
             raise ValueError("diameter must be positive")
+        names = [p.name for p in self.parachutes]
+        if len(set(names)) != len(names):
+            raise ValueError("parachute names must be unique")
 
     @property
     def reference_area(self) -> float:

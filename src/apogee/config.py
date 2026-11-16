@@ -19,6 +19,14 @@ Example::
     length_m = 1.83
     angle_deg = 90
 
+    [[parachute]]                  # repeat the block for each chute
+    name = "main"
+    diameter_m = 0.9
+    cd = 1.5
+    deploy = "apogee"              # "apogee", "altitude" or "burnout"
+    altitude_m = 150               # only for deploy = "altitude"
+    delay_s = 0                    # seconds after the trigger
+
 A constant-thrust motor can be given instead of a file with ``thrust_N``,
 ``burn_time_s``, ``propellant_mass_kg`` and optionally ``loaded_mass_kg``.
 """
@@ -33,6 +41,7 @@ from .atmosphere import StandardAtmosphere
 from .environment import Environment
 from .flight import LaunchRail
 from .motor import Motor
+from .recovery import Parachute
 from .rocket import Rocket
 
 
@@ -49,7 +58,11 @@ def load_config(path: str | Path) -> SimulationConfig:
         data = tomllib.load(fh)
     try:
         return SimulationConfig(
-            rocket=_rocket(data["rocket"], _motor(data["motor"], path.parent)),
+            rocket=_rocket(
+                data["rocket"],
+                _motor(data["motor"], path.parent),
+                [_parachute(p) for p in data.get("parachute", [])],
+            ),
             environment=_environment(data.get("environment", {})),
             rail=_rail(data.get("rail", {})),
         )
@@ -69,13 +82,25 @@ def _motor(cfg: dict, base: Path) -> Motor:
     )
 
 
-def _rocket(cfg: dict, motor: Motor) -> Rocket:
+def _rocket(cfg: dict, motor: Motor, parachutes: list[Parachute]) -> Rocket:
     return Rocket(
         name=cfg.get("name", "rocket"),
         dry_mass=cfg["dry_mass_kg"],
         diameter=cfg["diameter_m"],
         motor=motor,
         cd=cfg.get("cd", 0.5),
+        parachutes=parachutes,
+    )
+
+
+def _parachute(cfg: dict) -> Parachute:
+    return Parachute(
+        name=cfg["name"],
+        diameter=cfg["diameter_m"],
+        cd=cfg.get("cd", 1.5),
+        trigger=cfg.get("deploy", "apogee"),
+        altitude=cfg.get("altitude_m"),
+        delay=cfg.get("delay_s", 0.0),
     )
 
 
