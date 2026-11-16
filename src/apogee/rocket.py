@@ -1,7 +1,8 @@
 """Rocket definition.
 
 For the trajectory the rocket is a point mass with a fixed dry mass and a drag coefficient
-that is either constant or a function of Mach number, plus any number of parachutes.
+that is constant, a function of Mach number or estimated from the geometry, plus any number
+of parachutes.
 
 Give it an :class:`~apogee.components.Airframe` as well and it can also report stability:
 the center of pressure (Barrowman), the center of gravity as propellant burns, and the
@@ -14,7 +15,7 @@ import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from .aero import CenterOfPressure, barrowman
+from .aero import CenterOfPressure, DragBuildup, barrowman
 from .components import Airframe
 from .motor import Motor
 from .recovery import Parachute
@@ -25,8 +26,9 @@ class Rocket:
     """A single-stage rocket.
 
     ``dry_mass`` is everything except the motor [kg]. ``diameter`` is the body tube
-    outer diameter used as the drag reference [m]. ``cd`` is either a constant or a
-    callable ``cd(mach)``. ``motor`` may be ``None`` for unpowered test cases.
+    outer diameter used as the drag reference [m]. ``cd`` is a constant, a callable
+    ``cd(mach)`` or a :class:`~apogee.aero.DragBuildup`. ``motor`` may be ``None`` for
+    unpowered test cases.
     ``parachutes`` deploy in flight according to their triggers.
 
     ``airframe`` is optional geometry for stability. ``motor_position`` is the distance
@@ -89,7 +91,15 @@ class Rocket:
     def thrust_at(self, t: float) -> float:
         return self.motor.thrust_at(t) if self.motor else 0.0
 
-    def drag_coefficient(self, mach: float) -> float:
+    def drag_coefficient(self, mach: float, unit_reynolds: float | None = None) -> float:
+        """Drag coefficient at a Mach number.
+
+        ``unit_reynolds`` is the Reynolds number per metre (speed / kinematic viscosity).
+        Only a drag estimate built from the geometry uses it; without it that estimate
+        assumes sea level.
+        """
+        if isinstance(self.cd, DragBuildup) and unit_reynolds is not None:
+            return self.cd.at(mach, unit_reynolds)
         return float(self.cd(mach)) if callable(self.cd) else float(self.cd)
 
     # Stability. These need an airframe; without one they raise ValueError.

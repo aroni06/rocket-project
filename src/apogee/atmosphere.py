@@ -30,6 +30,12 @@ class AtmosphereState(NamedTuple):
     density: float  # kg/m^3
     speed_of_sound: float  # m/s
 
+    @property
+    def kinematic_viscosity(self) -> float:
+        """Kinematic viscosity [m^2/s], from Sutherland's law for air."""
+        t = self.temperature
+        return 1.458e-6 * t**1.5 / (t + 110.4) / self.density
+
 
 class Atmosphere(Protocol):
     def at(self, altitude: float) -> AtmosphereState:

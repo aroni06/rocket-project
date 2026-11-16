@@ -31,6 +31,7 @@ from pathlib import Path
 import numpy as np
 from scipy.integrate import solve_ivp
 
+from .aero import DragBuildup
 from .atmosphere import G0
 from .environment import Environment
 from .recovery import Parachute
@@ -279,6 +280,8 @@ class _Dynamics:
         self.env = env
         self.rail_dir = rail.direction
         self.area = rocket.reference_area
+        # Only a drag estimate built from the geometry needs the Reynolds number.
+        self.needs_reynolds = isinstance(rocket.cd, DragBuildup)
 
     def evaluate(
         self, t: float, y: np.ndarray, on_rail: bool, chute_drag_area: float = 0.0
@@ -297,7 +300,9 @@ class _Dynamics:
         v_air = math.hypot(vax, vaz)
         mach = v_air / atm.speed_of_sound
         q = 0.5 * atm.density * v_air * v_air
-        drag = q * (rocket.drag_coefficient(mach) * self.area + chute_drag_area)
+        unit_reynolds = v_air / atm.kinematic_viscosity if self.needs_reynolds else None
+        cd = rocket.drag_coefficient(mach, unit_reynolds)
+        drag = q * (cd * self.area + chute_drag_area)
 
         if on_rail or v_air < 1e-9:
             ux, uz = self.rail_dir
