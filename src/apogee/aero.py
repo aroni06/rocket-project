@@ -4,13 +4,15 @@ Drag can be a table of Cd against Mach number (:class:`CdTable`) or an estimate 
 from the geometry (:class:`DragBuildup`).
 
 Barrowman's method treats each part of the rocket as contributing a normal-force slope
-``CN_alpha`` (per radian of angle of attack, referenced to the body cross-section) acting
-at a known point. The center of pressure is their weighted average:
+``CN_alpha`` (per radian of angle of attack, referenced to the largest body cross-section)
+acting at a known point. The center of pressure is their weighted average:
 
     x_cp = sum(CN_alpha_i * x_i) / sum(CN_alpha_i)
 
 It assumes small angles of attack, subsonic flow, a slender rigid body and thin fins. A
-constant-diameter body tube contributes no normal force at small angles.
+constant-diameter body tube contributes no normal force at small angles. A section that
+changes diameter does: it adds to the normal force where the body widens and takes away
+where it narrows, in proportion to the change in cross-section.
 
 References: J. S. Barrowman, "The Practical Calculation of the Aerodynamic Characteristics
 of Slender Finned Vehicles", 1967. S. Niskanen, "OpenRocket technical documentation", 2013,
@@ -47,15 +49,27 @@ class CenterOfPressure:
     nose_position: float
     fin_cn_alpha: float
     fin_position: float
+    transition_cn_alpha: float = 0.0
+    transition_position: float = 0.0
 
 
 def barrowman(airframe: Airframe) -> CenterOfPressure:
-    """Center of pressure of a nose + body tube + trapezoidal fin set."""
+    """Center of pressure of a nose, optional transition, body tube and trapezoidal fins."""
     nose, fins = airframe.nose, airframe.fins
-    d = airframe.diameter
-    r = d / 2.0
+    d = airframe.diameter  # reference: the largest diameter
+    d_nose, d_body = airframe.nose_diameter, airframe.body.diameter
+    r = d_body / 2.0  # the fins sit on the body tube
 
+    cn_nose = NOSE_CN_ALPHA * (d_nose / d) ** 2
     x_nose = NOSE_CP_FRACTION[nose.shape] * nose.length
+
+    cn_transition = x_transition = 0.0
+    if airframe.transition is not None:
+        ratio = d_nose / d_body
+        cn_transition = 2.0 * ((d_body / d) ** 2 - (d_nose / d) ** 2)
+        x_transition = nose.length + airframe.transition.length / 3.0 * (
+            1.0 + (1.0 - ratio) / (1.0 - ratio**2)
+        )
 
     cr, ct, s, xs = fins.root_chord, fins.tip_chord, fins.span, fins.sweep
     mid_chord = math.hypot(s, xs + ct / 2.0 - cr / 2.0)  # length of the mid-chord line
@@ -72,9 +86,11 @@ def barrowman(airframe: Airframe) -> CenterOfPressure:
         + (cr + ct - cr * ct / (cr + ct)) / 6.0
     )
 
-    cn_total = NOSE_CN_ALPHA + cn_fins
-    x_cp = (NOSE_CN_ALPHA * x_nose + cn_fins * x_fins) / cn_total
-    return CenterOfPressure(x_cp, cn_total, NOSE_CN_ALPHA, x_nose, cn_fins, x_fins)
+    cn_total = cn_nose + cn_transition + cn_fins
+    x_cp = (cn_nose * x_nose + cn_transition * x_transition + cn_fins * x_fins) / cn_total
+    return CenterOfPressure(
+        x_cp, cn_total, cn_nose, x_nose, cn_fins, x_fins, cn_transition, x_transition
+    )
 
 
 @dataclass
@@ -133,7 +149,7 @@ class CdTable:
 # Drag build-up
 #
 # The drag of a rocket flying straight is the sum of a few separate effects, each with
-# its own simple formula. All coefficients are referenced to the body cross-section.
+# its own simple formula. All coefficients are referenced to the largest body cross-section.
 
 SUBSONIC_LIMIT = 0.8  # Mach number above which the drag estimate is too low
 SEA_LEVEL_SOUND_SPEED = 340.294  # m/s
@@ -190,13 +206,14 @@ def rounded_edge_drag_coefficient(mach: float) -> float:
 
 @dataclass(frozen=True)
 class DragBreakdown:
-    """Drag coefficient by source, each referenced to the body cross-section."""
+    """Drag coefficient by source, each referenced to the largest body cross-section."""
 
     body_friction: float
     fin_friction: float
     nose_pressure: float
     base: float
     fin_pressure: float
+    transition_pressure: float = 0.0
 
     @property
     def total(self) -> float:
@@ -206,6 +223,7 @@ class DragBreakdown:
             + self.nose_pressure
             + self.base
             + self.fin_pressure
+            + self.transition_pressure
         )
 
 
@@ -218,6 +236,9 @@ class DragBuildup:
       boundary layer on a surface of the given ``roughness`` [m], corrected for the
       body's fineness and the fins' thickness
     - **nose pressure drag**, zero for shapes that blend smoothly into the body
+    - **transition pressure drag** where the body changes diameter: like a blunt cone
+      where it widens, and a share of the base drag where it narrows quickly (none if
+      it tapers over more than three times the change in diameter)
     - **base drag** from the wake behind the flat aft end
     - **fin pressure drag** on the leading and trailing edges, depending on the profile
 
@@ -231,7 +252,7 @@ class DragBuildup:
     a Mach number alone evaluates it at sea level, which is enough for a plot or a table.
 
     The default roughness of 60 micrometres is a regular painted surface; 20 is smooth
-    paint and 150 is unfinished.
+    paint and 150 is unfinished. A part with its own ``roughness`` uses that instead.
     """
 
     def __init__(self, airframe: Airframe, roughness: float = 60e-6) -> None:
@@ -242,28 +263,66 @@ class DragBuildup:
             raise ValueError("the drag estimate needs the fin thickness (fins.thickness_m)")
         self.airframe = airframe
         self.roughness = roughness
-        d = airframe.diameter
+        d = airframe.diameter  # reference: the largest diameter
+        d_nose, d_body = airframe.nose_diameter, airframe.body.diameter
         self.length = airframe.length
         self._reference = math.pi * d * d / 4.0
-        self._relative_roughness = roughness / self.length
 
-        body_wetted = airframe.nose.wetted_area(d / 2.0) + math.pi * d * airframe.body.length
+        # Wetted area and roughness of each part of the body.
+        body_parts = [
+            (airframe.nose.wetted_area(d_nose / 2.0), airframe.nose.roughness),
+            (math.pi * d_body * airframe.body.length, airframe.body.roughness),
+        ]
+        # Share of the reference area that each pressure term acts on.
+        self._base_share = (d_body / d) ** 2
+        self._boattail_share = self._shoulder_pressure = 0.0
+        transition = airframe.transition
+        if transition is not None:
+            body_parts.append(
+                (transition.wetted_area(d_nose / 2.0, d_body / 2.0), transition.roughness)
+            )
+            step = abs(d_body**2 - d_nose**2) / d**2
+            if d_body > d_nose:
+                half_angle = math.atan2((d_body - d_nose) / 2.0, transition.length)
+                self._shoulder_pressure = 0.8 * math.sin(half_angle) ** 2 * step
+            else:
+                taper = transition.length / (d_nose - d_body)
+                self._boattail_share = step * min(1.0, max(0.0, (3.0 - taper) / 2.0))
         fin_wetted = 2.0 * fins.count * fins.planform_area
         fineness = self.length / d
-        self._body_factor = (1.0 + 1.0 / (2.0 * fineness)) * body_wetted / self._reference
-        self._fin_factor = (
-            (1.0 + 2.0 * fins.thickness / fins.mean_aerodynamic_chord) * fin_wetted
-        ) / self._reference
-        self._nose_pressure = 0.8 * math.sin(airframe.nose.joint_angle(d / 2.0)) ** 2
+        body_factor = (1.0 + 1.0 / (2.0 * fineness)) / self._reference
+        # (area factor, relative roughness) for every surface that has skin friction.
+        self._body_surfaces = [
+            (body_factor * area, self._relative(part_roughness))
+            for area, part_roughness in body_parts
+        ]
+        self._fin_surface = (
+            (1.0 + 2.0 * fins.thickness / fins.mean_aerodynamic_chord)
+            * fin_wetted
+            / self._reference,
+            self._relative(fins.roughness),
+        )
+        self._nose_pressure = (
+            0.8 * math.sin(airframe.nose.joint_angle(d_nose / 2.0)) ** 2 * (d_nose / d) ** 2
+        )
         self._fin_frontal = fins.count * fins.thickness * fins.span / self._reference
         self._sweep_factor = math.cos(fins.leading_edge_sweep) ** 2
         self._profile = fins.profile
 
+    def _relative(self, part_roughness: float | None) -> float:
+        """Roughness of a part, or the default, as a fraction of the rocket's length."""
+        if part_roughness is not None and part_roughness < 0:
+            raise ValueError("roughness must be non-negative")
+        return (self.roughness if part_roughness is None else part_roughness) / self.length
+
     def breakdown(self, mach: float, unit_reynolds: float) -> DragBreakdown:
         """Drag by source at a Mach number and Reynolds number per metre (speed / viscosity)."""
-        friction = skin_friction_coefficient(
-            unit_reynolds * self.length, self._relative_roughness, mach
-        )
+        reynolds = unit_reynolds * self.length
+
+        def friction(surface: tuple[float, float]) -> float:
+            factor, relative_roughness = surface
+            return factor * skin_friction_coefficient(reynolds, relative_roughness, mach)
+
         base = base_drag_coefficient(mach)
         if self._profile == "square":
             leading, trailing = stagnation_drag_coefficient(mach), base
@@ -272,11 +331,12 @@ class DragBuildup:
         else:  # airfoil
             leading, trailing = rounded_edge_drag_coefficient(mach), 0.0
         return DragBreakdown(
-            body_friction=friction * self._body_factor,
-            fin_friction=friction * self._fin_factor,
+            body_friction=math.fsum(friction(surface) for surface in self._body_surfaces),
+            fin_friction=friction(self._fin_surface),
             nose_pressure=self._nose_pressure,
-            base=base,
+            base=base * self._base_share,
             fin_pressure=(leading * self._sweep_factor + trailing) * self._fin_frontal,
+            transition_pressure=self._shoulder_pressure + base * self._boattail_share,
         )
 
     def at(self, mach: float, unit_reynolds: float) -> float:
