@@ -36,6 +36,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _simulate(args: argparse.Namespace) -> int:
+    from .aero import SEA_LEVEL_SOUND_SPEED, SEA_LEVEL_VISCOSITY, SUBSONIC_LIMIT, DragBuildup
     from .config import load_config
     from .flight import simulate
 
@@ -46,12 +47,24 @@ def _simulate(args: argparse.Namespace) -> int:
             f"Motor: {motor.name} ({motor.impulse_class}, {motor.total_impulse:.1f} N s, "
             f"{motor.burn_time:.2f} s burn)"
         )
+    if isinstance(cfg.rocket.cd, DragBuildup):
+        parts = cfg.rocket.cd.breakdown(0.3, 0.3 * SEA_LEVEL_SOUND_SPEED / SEA_LEVEL_VISCOSITY)
+        print(
+            f"Drag: estimated from geometry, Cd {parts.total:.3f} at Mach 0.3 "
+            f"(friction {parts.body_friction + parts.fin_friction:.3f}, base {parts.base:.3f}, "
+            f"fin edges {parts.fin_pressure:.3f}, nose {parts.nose_pressure:.3f})"
+        )
     try:
         result = simulate(cfg.rocket, cfg.environment, cfg.rail)
     except RuntimeError as exc:
         print(f"Simulation failed: {exc}", file=sys.stderr)
         return 1
     print(result)
+    if isinstance(cfg.rocket.cd, DragBuildup) and result.max_mach > SUBSONIC_LIMIT:
+        print(
+            f"Warning: the flight reaches Mach {result.max_mach:.2f}. The drag estimate has no "
+            f"wave drag, so above Mach {SUBSONIC_LIMIT:g} it is too low and the apogee too high."
+        )
     margin = result.static_margin_at("rail_exit")
     if margin is not None:
         print(f"Stability: {_stability_verdict(margin)}")

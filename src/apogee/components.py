@@ -13,7 +13,10 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
+import numpy as np
+
 NOSE_SHAPES = ("conical", "ogive", "parabolic", "elliptical")
+FIN_PROFILES = ("square", "rounded", "airfoil")
 
 
 @dataclass
@@ -39,6 +42,35 @@ class NoseCone:
             raise ValueError("nose mass must be non-negative")
         if self.cg is None:
             self.cg = 2.0 * self.length / 3.0
+
+    def profile(self, radius: float, points: int = 60) -> tuple[np.ndarray, np.ndarray]:
+        """Radius of the nose against distance from the tip, for a given base radius."""
+        length = self.length
+        x = np.linspace(0.0, length, points)
+        u = x / length
+        if self.shape == "conical":
+            y = radius * u
+        elif self.shape == "parabolic":
+            y = radius * (2 * u - u**2)
+        elif self.shape == "elliptical":
+            y = radius * np.sqrt(1 - (1 - u) ** 2)
+        else:  # tangent ogive
+            rho = (radius**2 + length**2) / (2 * radius)
+            y = np.sqrt(rho**2 - (length - x) ** 2) + radius - rho
+        return x, y
+
+    def wetted_area(self, radius: float) -> float:
+        """Outside surface area of the nose [m^2], summed from thin conical bands."""
+        x, y = self.profile(radius, points=2000)
+        slant = np.hypot(np.diff(x), np.diff(y))
+        return float(np.sum(math.pi * (y[:-1] + y[1:]) * slant))
+
+    def joint_angle(self, radius: float) -> float:
+        """Angle between the nose surface and the body tube where they meet [rad].
+
+        Zero for the shapes that blend smoothly into the body; the half-angle for a cone.
+        """
+        return math.atan2(radius, self.length) if self.shape == "conical" else 0.0
 
 
 @dataclass
@@ -66,6 +98,9 @@ class FinSet:
 
     Give ``mass`` for the whole set, or ``thickness`` and ``density`` to compute it from
     the planform (useful when a design sweep changes the fin size).
+
+    ``profile`` is the cross-section, which matters for drag: ``"square"`` edges,
+    ``"rounded"`` edges, or an ``"airfoil"`` (rounded leading edge, tapered trailing edge).
     """
 
     count: int
@@ -77,10 +112,15 @@ class FinSet:
     mass: float | None = None
     thickness: float | None = None
     density: float | None = None
+    profile: str = "rounded"
 
     def __post_init__(self) -> None:
         if self.count < 3:
             raise ValueError("need at least 3 fins")
+        if self.profile not in FIN_PROFILES:
+            raise ValueError(f"fin profile must be one of {FIN_PROFILES}")
+        if self.thickness is not None and self.thickness <= 0:
+            raise ValueError("fin thickness must be positive")
         if self.root_chord <= 0 or self.span <= 0:
             raise ValueError("fin root chord and span must be positive")
         if self.tip_chord < 0 or self.sweep < 0:
@@ -97,6 +137,17 @@ class FinSet:
     def planform_area(self) -> float:
         """Area of one fin [m^2]."""
         return 0.5 * (self.root_chord + self.tip_chord) * self.span
+
+    @property
+    def mean_aerodynamic_chord(self) -> float:
+        """Chord of the rectangular fin with the same area-weighted chord [m]."""
+        cr, ct = self.root_chord, self.tip_chord
+        return 2.0 * (cr * cr + cr * ct + ct * ct) / (3.0 * (cr + ct))
+
+    @property
+    def leading_edge_sweep(self) -> float:
+        """Sweep angle of the leading edge from straight out [rad]."""
+        return math.atan2(self.sweep, self.span)
 
     @property
     def centroid(self) -> float:

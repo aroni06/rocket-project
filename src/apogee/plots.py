@@ -143,22 +143,6 @@ def plot_trajectory(result: FlightResult, path: str | Path | None = None) -> Fig
     return fig
 
 
-def _nose_profile(shape: str, length: float, radius: float) -> tuple[np.ndarray, np.ndarray]:
-    """Radius of the nose cone against distance from the tip."""
-    x = np.linspace(0.0, length, 60)
-    u = x / length
-    if shape == "conical":
-        y = radius * u
-    elif shape == "parabolic":
-        y = radius * (2 * u - u**2)
-    elif shape == "elliptical":
-        y = radius * np.sqrt(1 - (1 - u) ** 2)
-    else:  # tangent ogive
-        rho = (radius**2 + length**2) / (2 * radius)
-        y = np.sqrt(rho**2 - (length - x) ** 2) + radius - rho
-    return x, y
-
-
 def plot_rocket(rocket: Rocket, path: str | Path | None = None) -> Figure:
     """Side view of the rocket with its center of gravity and center of pressure.
 
@@ -171,7 +155,7 @@ def plot_rocket(rocket: Rocket, path: str | Path | None = None) -> Figure:
     fins, x_fin = airframe.fins, airframe.fin_position
 
     fig, ax = plt.subplots(figsize=(9, 3.2), layout="constrained")
-    xn, yn = _nose_profile(airframe.nose.shape, airframe.nose.length, r)
+    xn, yn = airframe.nose.profile(r)
     outline_x = np.concatenate([xn, [length, length], xn[::-1]])
     outline_y = np.concatenate([yn, [r, -r], -yn[::-1]])
     ax.fill(outline_x, outline_y, facecolor="none", edgecolor=INK_MUTED, linewidth=1.4)

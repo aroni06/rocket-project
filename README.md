@@ -39,17 +39,18 @@ pytest
 
 ```
 Motor: Synthetic_H250 (H, 260.8 N s, 1.32 s burn)
+Drag: estimated from geometry, Cd 0.515 at Mach 0.3 (friction 0.368, base 0.132, fin edges 0.015, nose 0.000)
 Flight summary: Example L1 rocket, dual deploy
-  Apogee                                   896.63 m
-  Max speed                                170.49 m/s
+  Apogee                                   842.17 m
+  Max speed                                168.87 m/s
   Max ascent acceleration                   17.83 g
   Rail exit speed                           24.24 m/s
   Rail exit static margin                    1.99 cal
-  Drogue descent rate                       13.88 m/s
+  Drogue descent rate                       13.87 m/s
   Main deploy altitude                     150.00 m
-  Main opening load (upper bound)            8.88 g
+  Main opening load (upper bound)            8.86 g
   Landing descent rate                       4.38 m/s
-  Landing downrange                         88.65 m
+  Landing downrange                         92.95 m
   ...
 Stability: stable, 1.99 cal at rail exit
 ```
@@ -61,7 +62,8 @@ parachute opens on a trigger plus an optional delay: `apogee`, descending throug
 
 The `[nose]`, `[body]`, `[fins]` and `[[mass]]` sections describe the airframe. Dry mass and
 center of gravity are summed from the parts, or you can give measured values with `dry_mass_kg`
-and `dry_cg_m`. Drag is a constant `cd` or a `cd_file` CSV of Mach number against drag
+and `dry_cg_m`. Drag is one of three things: a `[drag]` table, which estimates the drag
+coefficient from the geometry; a constant `cd`; or a `cd_file` CSV of Mach number against drag
 coefficient, for example one exported from OpenRocket. Motors are RASP `.eng`
 files, the format published by [thrustcurve.org](https://www.thrustcurve.org). The bundled
 `Synthetic_*.eng` motors are made-up curves so the examples run out of the box; download real
@@ -119,22 +121,22 @@ apogee optimize studies/recovery.toml --plot recovery.png
 
 ```
 Optimum: Recovery sizing (minimize descent_drift_m)
-  parachute.drogue.diameter_m               0.2282
-  parachute.main.diameter_m                 0.7998
-  descent_drift_m                           232.66
+  parachute.drogue.diameter_m               0.2279
+  parachute.main.diameter_m                 0.7997
+  descent_drift_m                           223.34
   landing_descent_rate_mps                    5.00  (at most 5)
   main_opening_load_g                        12.00  (at most 12)
 Limited by
   landing_descent_rate_mps at its maximum of 5
   main_opening_load_g at its maximum of 12
-Flights simulated: 107
+Flights simulated: 105
 ```
 
 ![Descent drift over drogue and main parachute diameter](docs/images/study_recovery.png)
 
 *Smaller parachutes drift less, until the rocket lands too fast or the main opens too hard. The
 optimum sits where the two limits cross, and matches a hand calculation from the terminal
-velocity formula to 0.1% (it is one of the tests).*
+velocity formula to 0.3% (it is one of the tests).*
 
 A variable can also be a list of choices, such as motor files.
 [`studies/motor_and_fins.toml`](studies/motor_and_fins.toml) picks a motor and a fin span for the
@@ -144,23 +146,23 @@ highest flight under a 1100 m field ceiling:
 Optimum: Motor and fin span (maximize apogee_m)
   motor.file                            Synthetic_H250
   fins.span_m                              0.05253
-  apogee_m                                  908.83
+  apogee_m                                  863.26
   rail_exit_static_margin_cal                 1.00  (1 to 2.5)
   rail_exit_speed_mps                        24.46  (at least 15)
-  apogee_m                                  908.83  (at most 1100)
+  apogee_m                                  863.26  (at most 1100)
 Limited by
   rail_exit_static_margin_cal at its minimum of 1
 Best design for each choice
-  Synthetic_H250                            908.83
-  Synthetic_H120                            784.88
-  Synthetic_I300                           1307.49  (breaks a constraint)
-Flights simulated: 319
+  Synthetic_H250                            863.26
+  Synthetic_H120                            752.28
+  Synthetic_I300                           1179.43  (breaks a constraint)
+Flights simulated: 345
 ```
 
 ![Apogee against fin span for three motors](docs/images/study_motor_and_fins.png)
 
-*Smaller fins are lighter, so every motor flies higher with less fin, until the static margin
-drops below 1 caliber. The biggest motor is ruled out because it flies through the ceiling.*
+*Smaller fins are lighter and have less drag, so every motor flies higher with less fin, until
+the static margin drops below 1 caliber. The biggest motor is ruled out because it flies through the ceiling.*
 
 Variables are addressed by their path in the config (`fins.span_m`, `rail.angle_deg`,
 `motor.file`, `parachute.main.diameter_m`, `mass.ballast.mass_kg`). Objectives and constraints
@@ -203,7 +205,8 @@ $$
 | Thrust | RASP thrust curve, linear interpolation |
 | Mass | Propellant burns in proportion to delivered impulse: m_p(t) = m_p0 (1 - I(t) / I_total) |
 | Atmosphere | 1976 U.S. Standard Atmosphere, 0 to 32 km, launch-site elevation and temperature offset |
-| Drag | Constant C_D, a C_D-vs-Mach table from a CSV file, or any function C_D(Mach) |
+| Drag | Estimated from the geometry (below), or a constant C_D, a C_D-vs-Mach table from a CSV file, or any function C_D(Mach) |
+| Drag estimate | Turbulent skin friction on the wetted area with a roughness limit and compressibility correction, base drag, fin edge drag by profile, nose pressure drag for cones; depends on Mach and Reynolds number along the flight |
 | Center of pressure | Barrowman's equations for the nose cone (conical, ogive, parabolic, elliptical) and trapezoidal fins with fin-body interference |
 | Center of gravity | Mass-weighted average of nose, body tube, fins, point masses and the motor; moves forward as propellant burns |
 | Static margin | (x_CP - x_CG) / d in calibers, reported at liftoff, rail exit and burnout |
@@ -228,16 +231,17 @@ profiles and gusts, Earth rotation, multi-stage vehicles.
   (no transitions or boat tails yet).
 - The nose cone's own center of gravity defaults to 2/3 of its length from the tip. Weigh and
   balance real parts, or give the whole rocket's measured `dry_cg_m`.
-- The drag coefficient is an input and does not change with the geometry. A design study
-  therefore sees fin size through mass and stability only, not through fin drag, and
-  understates how much smaller fins help. A component drag build-up would fix this.
+- The drag estimate is subsonic. It has no wave drag, so above about Mach 0.8 it is too low
+  and the apogee too high; `apogee simulate` warns when a flight goes that fast. It leaves out
+  launch lugs and rail buttons, does not reduce base drag while the motor burns, and assumes a
+  fully turbulent boundary layer. It has not been compared with OpenRocket or flight data yet.
 - SLSQP is a local optimizer. Several starts guard against local optima, and a sweep of the same
   study is the independent check.
 - Parachutes inflate instantly, so the reported opening load is an upper bound on the real
   opening shock.
 - The rocket turns into the relative wind the moment it leaves the rail. A real rocket has
   rotational inertia and turns more slowly, so the model overpredicts how far upwind it flies in
-  a crosswind (220 m upwind at apogee in the example). OpenRocket comparisons will quantify this.
+  a crosswind (203 m upwind at apogee in the example). OpenRocket comparisons will quantify this.
 
 ## Verification
 
@@ -258,6 +262,9 @@ closed-form answer:
 | Descent in wind | Horizontal speed under canopy settles at wind speed | 1e-3 relative |
 | Barrowman center of pressure | Fin normal-force slope, fin and nose CP, total CP vs a hand calculation | 1e-5 relative |
 | Center of gravity | Component sum, motor at mid-length, forward shift during the burn | exact |
+| Skin friction | Smooth turbulent law vs the Prandtl-Schlichting flat-plate formula, Re 1e5 to 1e9 | 4% |
+| Drag estimate | Each component and the total vs a hand calculation; nose wetted area vs cone and hemisphere formulas | 1e-6 relative |
+| Drag in flight | Recorded drag vs q C_D A with C_D at the local Mach and Reynolds number | 1e-9 relative |
 | Optimizer, analytic problems | Constrained minimum of a quadratic, a variable at its bound, a target value, an infeasible problem | 1e-4 absolute or better |
 | Optimizer, best coasting mass | Mass that coasts highest for a fixed impulse with quadratic drag vs the closed-form optimum | 1e-6 relative in apogee |
 | Optimizer, recovery sizing | Drogue and main diameters vs hand sizing from terminal velocity and the opening-load ratio | 2e-3 and 5e-3 relative |
@@ -275,7 +282,7 @@ src/apogee/
   environment.py   gravity, wind, launch site
   recovery.py      parachutes, deployment triggers, terminal velocity
   components.py    nose cone, body tube, fins, point masses, dry mass and CG
-  aero.py          Barrowman center of pressure, Cd-vs-Mach tables
+  aero.py          Barrowman center of pressure, drag estimate, Cd-vs-Mach tables
   flight.py        equations of motion, phases, events, FlightResult
   study.py         design studies: sweeps, constraints, optimizer
   config.py        TOML loader
@@ -297,8 +304,9 @@ tests/             unit and analytic verification tests
 - [ ] 5. Validation against OpenRocket on 2 to 3 rockets
 - [x] 6. Parameter sweeps and constrained design optimizer
 - [x] 7. Flight animation
-- [ ] 8. Technical report and v1.0
-- [ ] 9. After v1.0: liquid and hybrid engines with throttling
+- [x] 8. Drag estimated from the geometry
+- [ ] 9. Technical report and v1.0
+- [ ] 10. After v1.0: liquid and hybrid engines with throttling
 
 ## License
 
